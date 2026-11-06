@@ -12,7 +12,8 @@ export const RESERVED_SLUGS = [
 	'assets',
 	'new',
 	'people',
-	'notifications'
+	'notifications',
+	'privacy'
 ];
 export const SESSION_COOKIE_NAME = 'as-hosting-session';
 export const SESSION_MAX_AGE_DAYS = 30;

@@ -16,6 +16,7 @@ AS Hosting is a management platform for Ashford School Hack Club with a public s
 - **Storage Tracking**: Monitor disk usage across all hosted sites
 - **Audit Log**: Track all administrative actions
 - **Slack Notifications**: Get notified about deployments and account changes
+- **Privacy-first analytics**: Cookie-free pageviews, referrers, devices, countries and engagement per site
 
 ## Tech Stack
 
@@ -69,6 +70,9 @@ PORT=5173
 # Optional: Slack bot for notifications
 SLACK_BOT_TOKEN=
 SLACK_SIGNING_SECRET=
+
+# Optional: how long analytics rows are kept (7-365, default 90)
+ANALYTICS_RETENTION_DAYS=90
 ```
 
 ## First-Run Setup
@@ -129,6 +133,44 @@ https://your-domain.com/<project-slug>/
 - **Archive**: Stop serving (files retained)
 - **Relaunch**: Restore archived site
 - **Delete**: Permanently remove archived files
+
+## Analytics
+
+Every hosted site gets a privacy-first analytics report at **Manage site → Analytics** (`/websites/<id>/analytics`), with 7, 30 and 90 day ranges and a CSV export.
+
+### What is collected
+
+| Area | Detail |
+| --- | --- |
+| Views | Pageviews per path, counted **server-side** so they still work with JavaScript disabled |
+| Visitors | Unique visitors per day, derived from a daily-salted hash (no cookies) |
+| Sessions | Visits and bounce rate, using a 30-minute inactivity window |
+| Acquisition | Referrer **hostname** only, split into direct / search / social / referral, plus `utm_source` / `utm_medium` / `utm_campaign` |
+| Audience | Device type, browser + major version, OS, country (from `CF-IPCountry` when present), browser language |
+| Behaviour | Visible time on page, scroll depth, viewport, outbound link hosts, downloads, 404s, and a day × hour visit heatmap |
+
+### What is never stored
+
+No cookies, no `localStorage`, no raw IP addresses, no raw user-agent strings, no full URLs or query strings, and no cross-site identifiers. The visitor hash is `sha256(dailySalt + "|" + ip + "|" + userAgent)` truncated to 16 hex characters; the salt is generated in memory and rotated at UTC midnight, so hashes cannot be reversed or linked across days.
+
+Requests are ignored entirely when the browser sends `DNT: 1` or `Sec-GPC: 1`, and requests from bots, link previews and prefetches are filtered out. The public explainer lives at `/privacy`.
+
+### How it works
+
+1. `GET /<slug>/<path>` records a `pageview`, `download` (known file extension) or `not_found` row, fire-and-forget, so serving is never blocked.
+2. A `<script defer src="/__as-hosting/analytics.js">` tag is injected into served HTML (before `</body>`). It reports `engagement` (duration, scroll depth, viewport, language) and `outbound` (target host) to `POST /api/analytics`, using `navigator.sendBeacon` and no credentials.
+3. `/api/analytics` only accepts same-origin JSON under 2 KB, validates the site and its `ACTIVE` status, clamps every numeric field, and rate limits to 40 events per minute per source IP.
+
+### Retention and maintenance
+
+Rows older than `ANALYTICS_RETENTION_DAYS` (default 90, min 7, max 365) are pruned on boot and every 6 hours. The table, indexes and cascade delete are part of the Drizzle schema, so `npm run db:push` is all that is needed — there are no migration files in this repo.
+
+### Caveats
+
+- Hosted HTML is sent with `Cache-Control: public, max-age=60` (root `max-age=300`), so repeat views inside that window come from the browser cache and are not counted.
+- Country data needs a proxy that sets `CF-IPCountry` (Cloudflare). Other deployments simply get no country rows.
+- Analytics requires `VIEW_WEBSITE`; anyone who can see a site can see its numbers.
+- The comments in `src/lib/server/analytics/collect.ts` and `analytics.service.ts` document every field, so extend there rather than storing new raw request data.
 
 ## Production Deployment
 
@@ -240,6 +282,10 @@ Add to crontab:
 - `GET /health/db` - Database health check
 - `POST /api/auth/logout` - Logout
 - `POST /api/settings/password` - Change password
+- `POST /api/analytics` - Hosted-site engagement/outbound beacon (same-origin JSON, rate limited)
+- `GET /__as-hosting/analytics.js` - Analytics beacon script injected into hosted HTML
+- `GET /websites/<id>/analytics/export` - CSV export of a site's analytics
+- `GET /privacy` - Public analytics privacy explainer
 
 ## License
 

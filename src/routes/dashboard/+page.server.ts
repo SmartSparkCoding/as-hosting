@@ -1,6 +1,7 @@
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { getAllWebsites, getStorageStats } from '$lib/server/services/website.service';
+import { getAnalyticsSummaries } from '$lib/server/services/analytics.service';
 import { getAuditLogs } from '$lib/server/services/audit.service';
 import { getRoleStats } from '$lib/server/services/user.service';
 import { formatBytes } from '$lib/utils';
@@ -15,16 +16,27 @@ export const load: PageServerLoad = async ({ locals }) => {
 		getRoleStats()
 	]);
 
+	const analytics = await getAnalyticsSummaries(
+		websites.map((website) => website.id),
+		7
+	).catch((err) => {
+		console.error('[analytics] Could not load dashboard summaries:', err);
+		return {} as Record<string, { pageviews: number; visitors: number }>;
+	});
+	const totalViews = Object.values(analytics).reduce((sum, site) => sum + site.pageviews, 0);
+
 	const activeCount = websites.filter((w) => w.status === 'ACTIVE').length;
 	const archivedCount = websites.filter((w) => w.status === 'ARCHIVED').length;
 
 	return {
 		websites,
+		analytics,
 		stats: {
 			active: activeCount,
 			archived: archivedCount,
 			total: websites.length,
-			storage: formatBytes(storageStats.totalBytes)
+			storage: formatBytes(storageStats.totalBytes),
+			views: totalViews
 		},
 		auditLogs,
 		roleStats,

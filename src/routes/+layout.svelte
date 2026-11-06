@@ -121,6 +121,13 @@
 		<main class="mx-auto max-w-6xl px-4 py-8">
 			{@render children()}
 		</main>
+
+		<footer class="mx-auto max-w-6xl px-4 pb-8 text-center text-xs text-zinc-600">
+			Hosted sites use cookie-free analytics.
+			<a href="/privacy" class="underline decoration-zinc-700 underline-offset-2 transition-colors hover:text-zinc-400">
+				What that means
+			</a>
+		</footer>
 	</div>
 {:else}
 	<div class="min-h-screen bg-zinc-950 text-zinc-100">
@@ -135,5 +142,12 @@
 		<main>
 			{@render children()}
 		</main>
+
+		<footer class="px-4 pb-8 text-center text-xs text-zinc-600">
+			Hosted sites use cookie-free analytics.
+			<a href="/privacy" class="underline decoration-zinc-700 underline-offset-2 transition-colors hover:text-zinc-400">
+				What that means
+			</a>
+		</footer>
 	</div>
 {/if}

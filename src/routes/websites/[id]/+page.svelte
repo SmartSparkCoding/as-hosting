@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import Sparkline from '$lib/components/analytics/Sparkline.svelte';
+	import { formatDuration, formatNumber } from '$lib/analytics';
 	import { PRODUCT_NAME } from '$lib/constants';
 	import { Permission } from '$lib/permissions';
 	import { formatBytes, formatDate, timeAgo } from '$lib/utils';
@@ -117,6 +119,16 @@
 					<path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
 				</svg>
 				Open website
+			</a>
+
+			<a
+				href="/websites/{website.id}/analytics"
+				class="inline-flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 transition-colors hover:border-zinc-600 hover:text-white"
+			>
+				<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+				</svg>
+				Analytics
 			</a>
 
 			{#if canEdit && website.status !== 'ARCHIVED'}
@@ -257,6 +269,58 @@
 				<p class="mt-2 text-sm text-zinc-300">{formatDate(website.expiresAt)}</p>
 			</div>
 		{/if}
+	</div>
+
+	<div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+		<div class="flex flex-wrap items-start justify-between gap-3">
+			<div>
+				<h2 class="text-lg font-semibold text-white">Analytics</h2>
+				<p class="mt-1 text-sm text-zinc-500">
+					Last 7 days &middot; no cookies and no personal data
+				</p>
+			</div>
+			<a
+				href="/websites/{website.id}/analytics"
+				class="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3.5 py-2 text-xs font-medium text-zinc-300 transition-colors hover:border-emerald-600 hover:text-emerald-400"
+			>
+				Full report
+				<svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+				</svg>
+			</a>
+		</div>
+
+		<div class="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
+			<div>
+				<p class="text-xs font-medium uppercase tracking-wider text-zinc-500">Pageviews</p>
+				<p class="mt-1.5 text-2xl font-bold tracking-tight text-white">
+					{formatNumber(data.analytics.pageviews)}
+				</p>
+			</div>
+			<div>
+				<p class="text-xs font-medium uppercase tracking-wider text-zinc-500">Visitors</p>
+				<p class="mt-1.5 text-2xl font-bold tracking-tight text-white">
+					{formatNumber(data.analytics.visitors)}
+				</p>
+			</div>
+			<div>
+				<p class="text-xs font-medium uppercase tracking-wider text-zinc-500">Avg. engagement</p>
+				<p class="mt-1.5 text-2xl font-bold tracking-tight text-white">
+					{formatDuration(data.analytics.averageEngagementSeconds)}
+				</p>
+			</div>
+			<div>
+				<p class="text-xs font-medium uppercase tracking-wider text-zinc-500">Missing pages</p>
+				<p class="mt-1.5 text-2xl font-bold tracking-tight {data.analytics.notFound > 0 ? 'text-amber-400' : 'text-white'}">
+					{formatNumber(data.analytics.notFound)}
+				</p>
+			</div>
+		</div>
+
+		<div class="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-800 pt-4">
+			<Sparkline series={data.analytics.series} width={240} height={48} />
+			<p class="text-xs text-zinc-500">Pageviews, last 7 days</p>
+		</div>
 	</div>
 
 	{#if data.deployments.length > 0}

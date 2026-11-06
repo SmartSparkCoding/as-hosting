@@ -1,6 +1,9 @@
 import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getWebsiteBySlug } from '$lib/server/services/website.service';
+import { recordAnalyticsEvent } from '$lib/server/services/analytics.service';
+import { normalisePath, hasDownloadExtension, parseUtm } from '$lib/server/analytics/collect';
+import { readCollectContext } from '$lib/server/analytics/request';
 import { HostingStorage } from '$lib/server/hosting/storage';
 import { readFile, stat } from 'node:fs/promises';
 import { join, normalize } from 'node:path';
@@ -29,6 +32,8 @@ const MIME_TYPES: Record<string, string> = {
 	'.zip': 'application/zip'
 };
 
+const ANALYTICS_SCRIPT_PATH = '/__as-hosting/analytics.js';
+
 function getMimeType(filePath: string): string {
 	const ext = '.' + filePath.split('.').pop()?.toLowerCase();
 	return MIME_TYPES[ext] || 'application/octet-stream';
@@ -39,15 +44,58 @@ function isPathSafe(requestedPath: string): boolean {
 	return !normalized.startsWith('..') && !normalized.startsWith('/');
 }
 
-function injectBase(html: string, basePath: string): string {
-	const base = `<base href="${basePath}">`;
-	if (html.includes('<head')) {
-		return html.replace(/<head([^>]*)>/i, `<head$1>${base}`);
-	}
-	return `${base}${html}`;
+function escapeAttribute(value: string): string {
+	return value
+		.replace(/&/g, '&amp;')
+		.replace(/"/g, '&quot;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;');
 }
 
-export const GET: RequestHandler = async ({ params, url }) => {
+/**
+ * The `<base>` href for a page served from a directory index. Relative asset
+ * URLs must resolve against the directory the visitor is actually on, so
+ * `/<slug>/blog/` keeps `style.css` pointed at `/<slug>/blog/style.css`.
+ */
+function directoryBaseHref(slug: string, sitePath: string): string {
+	const suffix = sitePath === '/' ? '/' : `${sitePath}/`;
+	return `/${slug}${suffix}`;
+}
+
+/**
+ * Adds the `<base>` tag (when the page is served from a directory index) plus
+ * the tiny analytics script. The script reports engagement/outbound clicks
+ * only; pageviews are counted server-side so they still work with JS off.
+ */
+function prepareHtml(
+	html: string,
+	basePath: string | null,
+	slug: string,
+	sitePath: string
+): string {
+	let output = html;
+
+	if (basePath) {
+		const base = `<base href="${escapeAttribute(basePath)}">`;
+		if (/<head[^>]*>/i.test(output)) {
+			output = output.replace(/<head([^>]*)>/i, `<head$1>${base}`);
+		} else {
+			output = `${base}${output}`;
+		}
+	}
+
+	const script =
+		`<script defer src="${ANALYTICS_SCRIPT_PATH}" ` +
+		`data-site="${escapeAttribute(slug)}" data-path="${escapeAttribute(sitePath)}"></script>`;
+
+	if (/<\/body>/i.test(output)) {
+		return output.replace(/<\/body>/i, `${script}</body>`);
+	}
+
+	return `${output}${script}`;
+}
+
+export const GET: RequestHandler = async ({ params, url, request, getClientAddress }) => {
 	const rawSlug = params.slug;
 
 	if (!rawSlug || !isPathSafe(rawSlug)) {
@@ -70,6 +118,19 @@ export const GET: RequestHandler = async ({ params, url }) => {
 	if (website.status !== 'ACTIVE') {
 		throw error(404, 'Website not available');
 	}
+
+	const sitePath = normalisePath(url.pathname.slice(slug.length + 1));
+	const context = readCollectContext(request, getClientAddress);
+
+	const capture = (type: 'pageview' | 'download' | 'not_found') => {
+		void recordAnalyticsEvent({
+			websiteId: website.id,
+			type,
+			path: sitePath,
+			ctx: context,
+			utm: type === 'pageview' ? parseUtm(url.searchParams) : null
+		}).catch((err) => console.error('[analytics] Failed to record event:', err));
+	};
 
 	const storage = new HostingStorage();
 	const basePath = storage.getServePath(website.id);
@@ -99,14 +160,18 @@ export const GET: RequestHandler = async ({ params, url }) => {
 			try {
 				await stat(indexPath);
 				const content = await readFile(indexPath, 'utf-8');
-				const htmlWithBase = injectBase(content, `/${slug}/`);
-				return new Response(htmlWithBase, {
-					headers: {
-						'Content-Type': 'text/html',
-						'Cache-Control': 'public, max-age=300'
+				capture('pageview');
+				return new Response(
+					prepareHtml(content, directoryBaseHref(slug, sitePath), slug, sitePath),
+					{
+						headers: {
+							'Content-Type': 'text/html',
+							'Cache-Control': 'public, max-age=300'
+						}
 					}
-				});
+				);
 			} catch {
+				capture('not_found');
 				throw error(404, 'Not found');
 			}
 		}
@@ -114,16 +179,22 @@ export const GET: RequestHandler = async ({ params, url }) => {
 		const content = await readFile(fullPath);
 		const mimeType = getMimeType(fullPath);
 
-		// For HTML files served at slug root, inject <base> tag for correct relative URLs
-		if (mimeType === 'text/html' && !subPath) {
+		if (mimeType === 'text/html') {
 			const html = content.toString('utf-8');
-			const htmlWithBase = injectBase(html, `/${slug}/`);
-			return new Response(htmlWithBase, {
-				headers: {
-					'Content-Type': mimeType,
-					'Cache-Control': 'public, max-age=60'
+			capture('pageview');
+			return new Response(
+				prepareHtml(html, subPath ? null : `/${slug}/`, slug, sitePath),
+				{
+					headers: {
+						'Content-Type': mimeType,
+						'Cache-Control': 'public, max-age=60'
+					}
 				}
-			});
+			);
+		}
+
+		if (hasDownloadExtension(fullPath)) {
+			capture('download');
 		}
 
 		return new Response(content, {
@@ -134,6 +205,7 @@ export const GET: RequestHandler = async ({ params, url }) => {
 		});
 	} catch (e: any) {
 		if (e?.status === 404) throw e;
+		capture('not_found');
 		throw error(404, 'Not found');
 	}
 };

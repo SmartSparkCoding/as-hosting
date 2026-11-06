@@ -137,6 +137,10 @@
 						<div class="mt-1 flex items-center gap-4 text-xs text-zinc-500">
 							<span>/{website.slug}</span>
 							<span>{formatBytes(website.storageBytes)}</span>
+							<span>
+								{(data.analytics[website.id]?.pageviews ?? 0).toLocaleString('en-GB')}
+								{(data.analytics[website.id]?.pageviews ?? 0) === 1 ? 'view' : 'views'}
+							</span>
 							<span>{timeAgo(website.createdAt)}</span>
 						</div>
 					</div>

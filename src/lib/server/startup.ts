@@ -4,12 +4,15 @@ import { eq } from 'drizzle-orm';
 import { HostingStorage } from './hosting/storage';
 import { Deployer } from './hosting/deployer';
 import { logAudit, AuditAction } from './services/audit.service';
+import { startAnalyticsRetention } from './services/analytics.service';
 
 let startupRan = false;
 
 export async function runStartupRecovery(): Promise<void> {
 	if (startupRan) return;
 	startupRan = true;
+
+	startAnalyticsRetention();
 
 	try {
 		await recoverBuildingWebsites();

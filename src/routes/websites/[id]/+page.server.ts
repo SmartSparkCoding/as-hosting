@@ -9,6 +9,7 @@ import {
 	deleteWebsite
 } from '$lib/server/services/website.service';
 import { getDeploymentsByWebsite, createDeployment } from '$lib/server/services/deployment.service';
+import { getWebsiteAnalyticsHighlights, emptyAnalyticsHighlight } from '$lib/server/services/analytics.service';
 import { Deployer } from '$lib/server/hosting/deployer';
 import { HostingStorage } from '$lib/server/hosting/storage';
 import { hasPermission, Permission } from '$lib/permissions';
@@ -24,11 +25,16 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 	if (!website) throw error(404, 'Website not found');
 
 	const deployments = await getDeploymentsByWebsite(website.id);
+	const analytics = await getWebsiteAnalyticsHighlights(website.id, 7).catch((err) => {
+		console.error('[analytics] Could not load website highlights:', err);
+		return emptyAnalyticsHighlight(7);
+	});
 	const baseUrl = process.env.PUBLIC_BASE_URL || 'http://localhost:5173';
 
 	return {
 		website,
 		deployments,
+		analytics,
 		publicUrl: `${baseUrl}/${website.slug}/`
 	};
 };

@@ -64,7 +64,7 @@
 		</p>
 	</div>
 
-	<div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+	<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
 		<div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
 			<div class="flex items-center justify-between">
 				<span class="text-sm font-medium text-zinc-400">Active</span>
@@ -100,6 +100,19 @@
 			</div>
 			<p class="mt-2 text-3xl font-bold text-white">{data.stats.storage}</p>
 			<p class="mt-1 text-xs text-zinc-500">total used</p>
+		</div>
+		<div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+			<div class="flex items-center justify-between">
+				<span class="text-sm font-medium text-zinc-400">Views</span>
+				<span class="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-violet-500/10">
+					<svg class="h-4 w-4 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+						<path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+					</svg>
+				</span>
+			</div>
+			<p class="mt-2 text-3xl font-bold text-white">{data.stats.views.toLocaleString('en-GB')}</p>
+			<p class="mt-1 text-xs text-zinc-500">pageviews, last 7 days</p>
 		</div>
 	</div>
 
@@ -189,6 +202,19 @@
 								<path stroke-linecap="round" stroke-linejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
 							</svg>
 							<span>{formatBytes(website.storageBytes)}</span>
+						</div>
+						<div class="flex items-center gap-2">
+							<svg class="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+								<path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+								<path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+							</svg>
+							<span>
+								{(data.analytics[website.id]?.pageviews ?? 0).toLocaleString('en-GB')}
+								{(data.analytics[website.id]?.pageviews ?? 0) === 1 ? 'view' : 'views'}
+								&middot;
+								{(data.analytics[website.id]?.visitors ?? 0).toLocaleString('en-GB')}
+								{(data.analytics[website.id]?.visitors ?? 0) === 1 ? 'visitor' : 'visitors'}
+							</span>
 						</div>
 					</div>
 
