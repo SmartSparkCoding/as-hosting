@@ -28,6 +28,7 @@ AS Hosting is a management platform for Ashford School Hack Club with a public s
 - **Sections**: Group sites into a section with its own index page at `/<section>/`
 - **Bulk deploy**: Paste a list of repositories and host the lot in one go
 - **Bulk actions**: Set visibility, archive, relaunch or move a whole section at once
+- **Landing page**: Logged out visitors get a public page at `/` with the club's live numbers and newest sites
 
 - **Sections** - group sites into a section with its own index page at `/<section>/`
 - **Bulk deploy** - paste a list of repositories and host them all in one go
