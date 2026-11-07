@@ -377,10 +377,10 @@
 				class="mt-4 space-y-4"
 				use:enhance={() => {
 					savingVisibility = true;
-					return async ({ update }) => {
+					return async ({ result, update }) => {
 						await update();
 						savingVisibility = false;
-						accessPassword = '';
+						if (result.type === 'success') accessPassword = '';
 					};
 				}}
 			>
@@ -412,7 +412,7 @@
 							name="accessPassword"
 							type="password"
 							bind:value={accessPassword}
-							placeholder={website.accessPasswordHash ? 'Leave blank to keep the current one' : 'At least 4 characters'}
+							placeholder={website.accessPasswordHash ? 'Leave blank to keep the current one' : 'At least 6 characters'}
 							class="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-500 focus:outline-none"
 						/>
 					</div>
