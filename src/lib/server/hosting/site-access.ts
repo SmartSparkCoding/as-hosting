@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { env } from '$env/dynamic/private';
 import { verifyPassword } from '../auth/password';
-import { checkLoginRateLimit } from '../auth/rate-limit';
+import { checkLoginRateLimit, resetLoginRateLimit } from '../auth/rate-limit';
 
 /**
  * Shared-password protection for hosted sites.
@@ -71,11 +71,13 @@ export async function checkSitePassword(
 ): Promise<{ ok: boolean; retryAfter?: number }> {
 	if (!passwordHash) return { ok: false };
 
-	const limit = checkLoginRateLimit(`site-access:${slug}:${clientAddress}`);
+	const key = `site-access:${slug}:${clientAddress}`;
+	const limit = checkLoginRateLimit(key);
 	if (!limit.allowed) return { ok: false, retryAfter: limit.retryAfter };
 
 	try {
 		const ok = await verifyPassword(password, passwordHash);
+		if (ok) resetLoginRateLimit(key);
 		return { ok };
 	} catch {
 		return { ok: false };

@@ -19,10 +19,19 @@ const MAX_URL_LENGTH = 500;
 /** eslint-disable-next-line no-control-regex */
 const CONTROL_OR_SPACE = /[\s\u0000-\u001f\u007f]/;
 
-export function parseGitUrl(raw: string): URL {
-	const trimmed = (raw ?? '').trim();
+/**
+ * People paste repository links without the scheme all the time
+ * (`github.com/you/site`), so a bare host is treated as `https://`.
+ * Anything that already carries a scheme is left alone and validated below.
+ */
+function withScheme(value: string): string {
+	return /^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : `https://${value}`;
+}
 
-	if (!trimmed) {
+export function parseGitUrl(raw: string): URL {
+	const trimmed = withScheme((raw ?? '').trim());
+
+	if (!trimmed || trimmed === 'https://') {
 		throw new InvalidGitUrlError('A repository URL is required.');
 	}
 

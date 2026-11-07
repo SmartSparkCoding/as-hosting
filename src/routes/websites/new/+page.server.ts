@@ -70,7 +70,7 @@ async function readVisibility(formData: FormData): Promise<
 }
 
 export const actions: Actions = {
-	default: async ({ request, locals }) => {
+	single: async ({ request, locals }) => {
 		if (!locals.user) return fail(401, { error: 'Not authenticated' });
 		if (!hasPermission(locals.user.role, Permission.CREATE_WEBSITE, locals.user.ambassadorPermission)) {
 			return fail(403, { error: 'Permission denied' });
@@ -148,24 +148,6 @@ export const actions: Actions = {
 		const access = await readVisibility(formData);
 		if (!access.ok) return fail(400, { error: access.error });
 
-		// One section for the whole batch, reused if it already exists so a
-		// workshop can add more sites later.
-		let group: { id: string; name: string; slug: string } | null = null;
-		if (groupName) {
-			const groupSlug = normalizeSlug(groupName);
-			if (!groupSlug || !isValidSlug(groupSlug)) {
-				return fail(400, { error: 'Use lowercase letters, numbers and hyphens for the section name.' });
-			}
-			const existing = await getGroupBySlug(groupSlug);
-			group = existing
-				? { id: existing.id, name: existing.name, slug: existing.slug }
-				: await createGroup(groupName, groupSlug, locals.user.id).then((created) => ({
-						id: created.id,
-						name: created.name,
-						slug: created.slug
-					}));
-		}
-
 		const taken = await getTakenSlugs();
 
 		interface BulkItem {
@@ -218,6 +200,44 @@ export const actions: Actions = {
 				base
 			};
 		});
+
+		const deployable = prepared.filter((item) => item.gitUrl && item.slug && item.name);
+		if (deployable.length === 0) {
+			return fail(400, {
+				error: 'None of those repository URLs could be used. Nothing was created and no section was made.',
+				bulk: {
+					group: null,
+					deployed: 0,
+					failed: prepared.length,
+					items: prepared.map((item) => ({
+						input: item.input,
+						slug: item.slug,
+						name: item.name,
+						status: item.status,
+						message: item.message
+					}))
+				}
+			});
+		}
+
+		// One section for the whole batch, reused if it already exists so a
+		// workshop can add more sites later. Only created once we know at least
+		// one repository is deployable, so a typo cannot leave an empty section.
+		let group: { id: string; name: string; slug: string } | null = null;
+		if (groupName) {
+			const groupSlug = normalizeSlug(groupName);
+			if (!groupSlug || !isValidSlug(groupSlug)) {
+				return fail(400, { error: 'Use lowercase letters, numbers and hyphens for the section name.' });
+			}
+			const existing = await getGroupBySlug(groupSlug);
+			group = existing
+				? { id: existing.id, name: existing.name, slug: existing.slug }
+				: await createGroup(groupName, groupSlug, locals.user.id).then((created) => ({
+						id: created.id,
+						name: created.name,
+						slug: created.slug
+					}));
+		}
 
 		const results = await mapWithConcurrency(prepared, BULK_CONCURRENCY, async (item) => {
 			if (!item.gitUrl || !item.slug || !item.name) return item;

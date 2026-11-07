@@ -24,6 +24,7 @@ AS Hosting is a management platform for Ashford School Hack Club with a public s
 - **Screenshot**: A preview of the site is captured after every deploy
 - **Commit statuses**: Deploy results are reported back to the GitHub repository
 - **Visibility**: Public, unlisted (noindex, hidden from stats) or shared-password sites
+- **Landing page**: Logged out visitors get a public page at `/` with the club's live numbers and the newest sites.
 - **Public stats**: A cookie-free club leaderboard of pageviews at `/stats`
 - **Sections**: Group sites into a section with its own index page at `/<section>/`
 - **Bulk deploy**: Paste a list of repositories and host the lot in one go

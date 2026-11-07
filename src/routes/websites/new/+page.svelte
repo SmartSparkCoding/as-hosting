@@ -160,7 +160,7 @@
 			</div>
 		{:else}
 			<div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
-				<form method="POST" use:enhance={handleEnhance} class="space-y-5">
+				<form method="POST" action="?/single" use:enhance={handleEnhance} class="space-y-5">
 					<div>
 						<label for="name" class="mb-1.5 block text-sm font-medium text-zinc-300">
 							Website name

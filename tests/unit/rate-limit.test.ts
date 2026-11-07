@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { checkLoginRateLimit } from '$lib/server/auth/rate-limit';
+import { checkLoginRateLimit, resetLoginRateLimit } from '$lib/server/auth/rate-limit';
 
 describe('Rate limiting', () => {
 	beforeEach(() => {
@@ -29,5 +29,16 @@ describe('Rate limiting', () => {
 		const resultB = checkLoginRateLimit('user-b');
 		expect(resultA.allowed).toBe(false);
 		expect(resultB.allowed).toBe(true);
+	});
+	it('forgets a lockout once the password was right', () => {
+		for (let i = 0; i < 4; i++) {
+			checkLoginRateLimit('reset-user');
+		}
+		expect(checkLoginRateLimit('reset-user').allowed).toBe(true);
+
+		resetLoginRateLimit('reset-user');
+
+		expect(checkLoginRateLimit('reset-user').allowed).toBe(true);
+		expect(checkLoginRateLimit('reset-user').allowed).toBe(true);
 	});
 });

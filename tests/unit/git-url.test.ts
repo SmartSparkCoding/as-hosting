@@ -36,6 +36,11 @@ describe('parseGitUrl', () => {
 		expect(() => parseGitUrl('https://github.com/')).toThrow(InvalidGitUrlError);
 	});
 
+	it('accepts a bare host and path without a scheme', () => {
+		expect(parseGitUrl('github.com/hackclub/site').pathname).toBe('/hackclub/site');
+		expect(normalizeGitUrl('github.com/hackclub/site.git')).toBe('https://github.com/hackclub/site');
+	});
+
 	it('rejects bare hostnames and ports', () => {
 		expect(() => parseGitUrl('https://localhost/a/b')).toThrow(InvalidGitUrlError);
 		expect(() => parseGitUrl('https://github.com:8443/a/b')).toThrow(InvalidGitUrlError);
