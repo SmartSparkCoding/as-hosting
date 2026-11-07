@@ -168,7 +168,7 @@ After the files are validated, `hosting/audit.ts` scans them for the problems th
 
 ### Commit statuses
 
-When `GITHUB_STATUS_TOKEN` is set, every deploy posts a commit status to `https://api.github.com/repos/<owner>/<repo>/statuses/<sha>` with the context `as-hosting/deploy`, linking to the live site. Non-GitHub remotes and deploys without a token are no-ops, so this works fine without any configuration.
+When `GITHUB_STATUS_TOKEN` is set, every deploy posts a commit status to `https://api.github.com/repos/<owner>/<repo>/statuses/<sha>` with the context `as-hosting/deploy`, linking to the live site. On a successful deploy that link carries `utm_source=github&utm_campaign=deploy-<n>`, where `<n>` counts the site's real deploys, so clicks on the check show up in the site's own analytics under Campaigns as `deploy-<n>`. Failed deploys link to the site untagged. Non-GitHub remotes and deploys without a token are no-ops, so this works fine without any configuration.
 
 ### Visibility
 

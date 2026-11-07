@@ -11,7 +11,7 @@ import {
 	setShowInPublicStats,
 	type SiteVisibility
 } from '$lib/server/services/website.service';
-import { getDeploymentsByWebsite, createDeployment } from '$lib/server/services/deployment.service';
+import { countDeployments, getDeploymentsByWebsite, createDeployment } from '$lib/server/services/deployment.service';
 import { getWebsiteAnalyticsHighlights, emptyAnalyticsHighlight } from '$lib/server/services/analytics.service';
 import { Deployer } from '$lib/server/hosting/deployer';
 import { HostingStorage } from '$lib/server/hosting/storage';
@@ -19,7 +19,7 @@ import { hasPermission, Permission } from '$lib/permissions';
 import { logAudit, AuditAction } from '$lib/server/services/audit.service';
 import { getUserById } from '$lib/server/services/user.service';
 import { hashPassword } from '$lib/server/auth/password';
-import { postDeployStatus } from '$lib/server/github/deploy-status';
+import { deployTargetUrl, postDeployStatus } from '$lib/server/github/deploy-status';
 import { createSlackNotifier, notifyDeploymentFailure } from '$lib/server/slack/notifier';
 import { formatBytes } from '$lib/utils';
 
@@ -70,6 +70,7 @@ export const actions: Actions = {
 		const deployer = new Deployer();
 		const result = await deployer.deploy(website.id, website.gitUrl);
 		const publicUrl = `${process.env.PUBLIC_BASE_URL || 'http://localhost:5173'}/${website.slug}/`;
+		const deployNumber = (await countDeployments(website.id)) + 1;
 
 		if (result.success) {
 			const storage = new HostingStorage();
@@ -82,7 +83,7 @@ export const actions: Actions = {
 				commitSha: result.commitSha,
 				state: 'success',
 				description: `Deployed ${website.name}`,
-				targetUrl: publicUrl
+				targetUrl: deployTargetUrl(publicUrl, deployNumber)
 			}).catch(() => null);
 
 			await createDeployment(
