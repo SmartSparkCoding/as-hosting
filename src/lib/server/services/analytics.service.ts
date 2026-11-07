@@ -577,6 +577,53 @@ export async function getAnalyticsSummaries(
 	return summary;
 }
 
+export interface LiveVisitors {
+	/** Distinct visitor hashes seen in the window. */
+	visitors: number;
+	pageviews: number;
+	paths: { path: string; count: number }[];
+	windowMinutes: number;
+}
+
+/**
+ * "Who is on the site right now" for the last few minutes. Only valid because
+ * visitor hashes keep the same daily salt until UTC midnight, so hashes stay
+ * comparable inside a short window without linking anyone across days.
+ */
+export async function getLiveVisitors(websiteId: string, minutes = 5): Promise<LiveVisitors> {
+	const windowMinutes = Math.min(Math.max(minutes, 1), 60);
+	const since = new Date(Date.now() - windowMinutes * 60 * 1000);
+
+	const scope = and(
+		eq(analyticsEvents.websiteId, websiteId),
+		eq(analyticsEvents.type, 'pageview'),
+		gte(analyticsEvents.createdAt, since)
+	);
+
+	const [totals] = await db
+		.select({
+			pageviews: count(),
+			visitors: countDistinct(analyticsEvents.visitorHash)
+		})
+		.from(analyticsEvents)
+		.where(scope);
+
+	const paths = await db
+		.select({ path: analyticsEvents.path, hits: count() })
+		.from(analyticsEvents)
+		.where(scope)
+		.groupBy(analyticsEvents.path)
+		.orderBy(desc(count()))
+		.limit(5);
+
+	return {
+		visitors: numberValue(totals?.visitors),
+		pageviews: numberValue(totals?.pageviews),
+		paths: paths.map((row) => ({ path: row.path, count: numberValue(row.hits) })),
+		windowMinutes
+	};
+}
+
 export async function pruneAnalyticsEvents(): Promise<number> {
 	const cutoff = new Date(Date.now() - getRetentionDays() * 24 * 60 * 60 * 1000);
 	const deleted = await db

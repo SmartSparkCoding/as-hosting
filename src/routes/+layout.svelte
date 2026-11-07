@@ -20,6 +20,8 @@
 			links.push({ href: '/settings/people', label: 'People' });
 		}
 
+		links.push({ href: '/stats', label: 'Club stats' });
+
 		links.push({ href: '/settings', label: 'Settings' });
 
 		return links;

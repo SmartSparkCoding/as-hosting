@@ -14,6 +14,7 @@ import {
 export const userRoleEnum = pgEnum('user_role', ['MAIN_LEADER', 'CO_LEADER', 'AMBASSADOR']);
 export const ambassadorPermEnum = pgEnum('ambassador_permission', ['VIEWER', 'LEADER']);
 export const websiteStatusEnum = pgEnum('website_status', ['BUILDING', 'ACTIVE', 'ARCHIVED', 'FAILED']);
+export const siteVisibilityEnum = pgEnum('site_visibility', ['PUBLIC', 'UNLISTED', 'PASSWORD']);
 
 export const users = pgTable('users', {
 	id: uuid('id').primaryKey().defaultRandom(),
@@ -45,6 +46,9 @@ export const websites = pgTable('websites', {
 	gitUrl: text('git_url').notNull(),
 	status: websiteStatusEnum('status').notNull().default('BUILDING'),
 	storageBytes: integer('storage_bytes').notNull().default(0),
+	visibility: siteVisibilityEnum('visibility').notNull().default('PUBLIC'),
+	accessPasswordHash: text('access_password_hash'),
+	showInPublicStats: boolean('show_in_public_stats').notNull().default(true),
 	createdBy: uuid('created_by')
 		.notNull()
 		.references(() => users.id),
@@ -63,6 +67,15 @@ export const deployments = pgTable('deployments', {
 	success: boolean('success').notNull(),
 	log: text('log').notNull().default(''),
 	errorMessage: text('error_message'),
+	/** deploy | rollback | recovery */
+	kind: varchar('kind', { length: 16 }).notNull().default('deploy'),
+	release: varchar('release', { length: 64 }),
+	commitSha: varchar('commit_sha', { length: 40 }),
+	commitMessage: varchar('commit_message', { length: 255 }),
+	/** 0-100 result of the static site checks, null when checks did not run */
+	auditScore: integer('audit_score'),
+	/** JSON array of { level, message } */
+	auditIssues: text('audit_issues'),
 	createdAt: timestamp('created_at').notNull().defaultNow()
 });
 

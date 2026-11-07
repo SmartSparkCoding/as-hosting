@@ -99,3 +99,44 @@ export async function notifyWebsiteExpired(
 		`⏰ Website expired\n\n${projectName} has expired and is no longer being served.`
 	);
 }
+
+export async function notifyTrafficSpike(
+	notifier: SlackNotifier,
+	slackId: string,
+	siteName: string,
+	pageviews: number,
+	baseline: number,
+	reportUrl: string
+): Promise<void> {
+	await notifier.sendDM(
+		slackId,
+		`📈 Traffic spike on ${siteName}\n\n${pageviews} pageviews in the last hour, about ${baseline}/hour is normal.\n\n${reportUrl}`
+	);
+}
+
+export async function notifyErrorSpike(
+	notifier: SlackNotifier,
+	slackId: string,
+	siteName: string,
+	notFound: number,
+	topPath: string | null,
+	reportUrl: string
+): Promise<void> {
+	await notifier.sendDM(
+		slackId,
+		`🧭 Lots of 404s on ${siteName}\n\n${notFound} missing pages in the last hour${topPath ? `, mostly ${topPath}` : ''}. Something is probably linked wrong.\n\n${reportUrl}`
+	);
+}
+
+export async function notifyTrafficDrop(
+	notifier: SlackNotifier,
+	slackId: string,
+	siteName: string,
+	previousWeekViews: number,
+	reportUrl: string
+): Promise<void> {
+	await notifier.sendDM(
+		slackId,
+		`📉 No visitors on ${siteName}\n\nNothing in the last 24 hours, though it had ${previousWeekViews} pageviews the week before. Worth checking the last deploy.\n\n${reportUrl}`
+	);
+}

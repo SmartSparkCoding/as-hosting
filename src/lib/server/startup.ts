@@ -5,6 +5,7 @@ import { HostingStorage } from './hosting/storage';
 import { Deployer } from './hosting/deployer';
 import { logAudit, AuditAction } from './services/audit.service';
 import { startAnalyticsRetention } from './services/analytics.service';
+import { startAnalyticsAlerts } from './analytics/analytics-alerts';
 
 let startupRan = false;
 
@@ -13,6 +14,7 @@ export async function runStartupRecovery(): Promise<void> {
 	startupRan = true;
 
 	startAnalyticsRetention();
+	startAnalyticsAlerts();
 
 	try {
 		await recoverBuildingWebsites();
@@ -98,7 +100,13 @@ async function verifyActiveWebsites(): Promise<void> {
 				await db.insert(deployments).values({
 					websiteId: site.id,
 					success: true,
-					log: `[startup recovery] ${result.log}`
+					log: `[startup recovery] ${result.log}`,
+					kind: 'recovery',
+					release: result.release ?? null,
+					commitSha: result.commitSha ?? null,
+					commitMessage: result.commitMessage ?? null,
+					auditScore: result.audit?.score ?? null,
+					auditIssues: result.audit ? JSON.stringify(result.audit.issues) : null
 				});
 
 				console.log(`[startup] "${site.name}" redeployed successfully`);
@@ -112,7 +120,8 @@ async function verifyActiveWebsites(): Promise<void> {
 					websiteId: site.id,
 					success: false,
 					log: `[startup recovery] ${result.log}`,
-					errorMessage: result.error
+					errorMessage: result.error,
+					kind: 'recovery'
 				});
 
 				console.log(`[startup] "${site.name}" redeploy failed: ${result.error}`);

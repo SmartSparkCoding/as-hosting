@@ -13,7 +13,8 @@ export const RESERVED_SLUGS = [
 	'new',
 	'people',
 	'notifications',
-	'privacy'
+	'privacy',
+	'stats'
 ];
 export const SESSION_COOKIE_NAME = 'as-hosting-session';
 export const SESSION_MAX_AGE_DAYS = 30;

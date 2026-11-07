@@ -19,6 +19,13 @@
 	let deleting = $state(false);
 	let relaunchExpiry = $state('');
 	let copiedUrl = $state(false);
+	let rollingBack = $state<string | null>(null);
+	let savingVisibility = $state(false);
+	let visibilityChoice = $state<'PUBLIC' | 'UNLISTED' | 'PASSWORD'>('PUBLIC');
+	let accessPassword = $state('');
+	let showInPublicStats = $state(true);
+	let visibilityInitialised = $state(false);
+	let thumbnailFailed = $state(false);
 
 	const website = $derived(data.website);
 	const baseUrl = $derived(data.publicUrl);
@@ -28,6 +35,14 @@
 	const canRelaunch = $derived(data.permissions.includes(Permission.RELAUNCH_WEBSITE));
 	const canDelete = $derived(data.permissions.includes(Permission.DELETE_WEBSITE));
 	const canViewLogs = $derived(data.permissions.includes(Permission.VIEW_BUILD_LOGS));
+
+	// Sync the form fields once the site loads (and after a save round trip).
+	$effect(() => {
+		if (visibilityInitialised) return;
+		visibilityChoice = (website.visibility ?? 'PUBLIC') as 'PUBLIC' | 'UNLISTED' | 'PASSWORD';
+		showInPublicStats = website.showInPublicStats ?? true;
+		visibilityInitialised = true;
+	});
 
 	function statusColor(status: string) {
 		switch (status) {
@@ -78,8 +93,33 @@
 			archiving = false;
 			relaunching = false;
 			deleting = false;
+			savingVisibility = false;
+			rollingBack = null;
 		}
 	});
+
+	function deploymentLabel(deployment: { kind?: string | null }): string | null {
+		if (deployment.kind === 'rollback') return 'Rollback';
+		if (deployment.kind === 'recovery') return 'Recovery';
+		return null;
+	}
+
+	function parseAuditIssues(raw: string | null | undefined): { level: string; message: string }[] {
+		if (!raw) return [];
+		try {
+			const parsed = JSON.parse(raw);
+			return Array.isArray(parsed) ? parsed : [];
+		} catch {
+			return [];
+		}
+	}
+
+	function auditTone(score: number | null | undefined): string {
+		if (score === null || score === undefined) return 'bg-zinc-500/10 text-zinc-400';
+		if (score >= 90) return 'bg-emerald-500/10 text-emerald-400';
+		if (score >= 70) return 'bg-amber-500/10 text-amber-400';
+		return 'bg-red-500/10 text-red-400';
+	}
 </script>
 
 <svelte:head>
@@ -323,6 +363,98 @@
 		</div>
 	</div>
 
+	{#if canEdit}
+		<div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+			<h2 class="text-lg font-semibold text-white">Who can see this site</h2>
+			<p class="mt-1 text-sm text-zinc-500">
+				Unlisted sites still work for anyone with the link but stay out of search engines and
+				the club stats page. Password protected sites ask for a shared password first.
+			</p>
+
+			<form
+				method="POST"
+				action="?/setVisibility"
+				class="mt-4 space-y-4"
+				use:enhance={() => {
+					savingVisibility = true;
+					return async ({ update }) => {
+						await update();
+						savingVisibility = false;
+						accessPassword = '';
+					};
+				}}
+			>
+				<div class="space-y-2">
+					{#each [{ value: 'PUBLIC', label: 'Public', hint: 'Listed in search engines and club stats' }, { value: 'UNLISTED', label: 'Unlisted', hint: 'Works by link, hidden from search and stats' }, { value: 'PASSWORD', label: 'Password protected', hint: 'Asks for a shared password before serving anything' }] as option (option.value)}
+						<label class="flex cursor-pointer items-start gap-3 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 transition-colors hover:border-zinc-700">
+							<input
+								type="radio"
+								name="visibility"
+								value={option.value}
+								bind:group={visibilityChoice}
+								class="mt-0.5 h-4 w-4 accent-emerald-500"
+							/>
+							<span>
+								<span class="block text-sm font-medium text-zinc-200">{option.label}</span>
+								<span class="block text-xs text-zinc-500">{option.hint}</span>
+							</span>
+						</label>
+					{/each}
+				</div>
+
+				{#if visibilityChoice === 'PASSWORD'}
+					<div>
+						<label for="accessPassword" class="text-xs font-medium uppercase tracking-wider text-zinc-500">
+							Password
+						</label>
+						<input
+							id="accessPassword"
+							name="accessPassword"
+							type="password"
+							bind:value={accessPassword}
+							placeholder={website.accessPasswordHash ? 'Leave blank to keep the current one' : 'At least 4 characters'}
+							class="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-500 focus:outline-none"
+						/>
+					</div>
+				{/if}
+
+				<label class="flex items-center gap-2 text-sm text-zinc-400">
+					<input
+						type="checkbox"
+						name="showInPublicStats"
+						bind:checked={showInPublicStats}
+						class="h-4 w-4 accent-emerald-500"
+					/>
+					Count this site in the public club stats page
+				</label>
+
+				<button
+					type="submit"
+					disabled={savingVisibility}
+					class="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-emerald-500 active:scale-[0.98] disabled:opacity-50"
+				>
+					{savingVisibility ? 'Saving...' : 'Save'}
+				</button>
+			</form>
+		</div>
+	{/if}
+
+	{#if !thumbnailFailed && website.status !== 'ARCHIVED'}
+		<div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+			<div class="flex items-center justify-between">
+				<h2 class="text-lg font-semibold text-white">Preview</h2>
+				<p class="text-xs text-zinc-500">Captured after the last deploy</p>
+			</div>
+			<img
+				src="/websites/{website.id}/thumbnail?release={data.activeRelease ?? 'latest'}"
+				alt="Screenshot of {website.name}"
+				class="mt-4 w-full rounded-lg border border-zinc-800"
+				loading="lazy"
+				onerror={() => (thumbnailFailed = true)}
+			/>
+		</div>
+	{/if}
+
 	{#if data.deployments.length > 0}
 		<div>
 			<h2 class="text-lg font-semibold text-white mb-4">Deployment history</h2>
@@ -347,20 +479,77 @@
 									<p class="text-sm font-medium text-zinc-200">
 										{#if i === 0}Latest deployment{:else}Deployment {data.deployments.length - i}{/if}
 									</p>
-									<p class="text-xs text-zinc-500">{timeAgo(deployment.createdAt)}</p>
+									<p class="text-xs text-zinc-500">
+										{timeAgo(deployment.createdAt)}
+										{#if deployment.commitSha}
+											<span class="text-zinc-600">·</span>
+											<span class="font-mono text-zinc-500">{deployment.commitSha.slice(0, 7)}</span>
+										{/if}
+									</p>
 								</div>
 							</div>
 
-							{#if deployment.errorMessage}
-								<span class="shrink-0 rounded-full bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-400">
-									Failed
-								</span>
-							{:else}
-								<span class="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-400">
-									Success
-								</span>
-							{/if}
+							<div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
+								{#if deployment.auditScore !== null && deployment.auditScore !== undefined}
+									<span
+										class="rounded-full px-2 py-0.5 text-xs font-medium {auditTone(deployment.auditScore)}"
+										title="Site checks score"
+									>
+										Checks {deployment.auditScore}/100
+									</span>
+								{/if}
+
+								{#if deploymentLabel(deployment)}
+									<span class="rounded-full bg-sky-500/10 px-2 py-0.5 text-xs font-medium text-sky-400">
+										{deploymentLabel(deployment)}
+									</span>
+								{/if}
+
+								{#if canEdit && website.status !== 'ARCHIVED' && deployment.success && deployment.release && deployment.release !== data.activeRelease}
+									<form
+										method="POST"
+										action="?/rollback"
+										use:enhance={() => {
+											rollingBack = deployment.release;
+											return async ({ update }) => {
+												await update();
+												rollingBack = null;
+											};
+										}}
+									>
+										<input type="hidden" name="release" value={deployment.release} />
+										<button
+											type="submit"
+											disabled={rollingBack !== null}
+											class="rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-1 text-xs font-medium text-zinc-300 transition-colors hover:border-emerald-600 hover:text-emerald-400 disabled:opacity-50"
+											title="Put this release back online"
+										>
+											{rollingBack === deployment.release ? 'Rolling back...' : 'Rollback'}
+										</button>
+									</form>
+								{/if}
+
+								{#if deployment.errorMessage}
+									<span class="rounded-full bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-400">
+										Failed
+									</span>
+								{:else}
+									<span class="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-400">
+										Success
+									</span>
+								{/if}
+							</div>
 						</div>
+
+						{#if deployment.commitMessage || deployment.release}
+							<p class="mt-2 truncate text-xs text-zinc-500">
+								{#if deployment.commitMessage}{deployment.commitMessage}{/if}
+								{#if deployment.release}
+									<span class="text-zinc-600">·</span>
+									<span class="font-mono">{deployment.release}</span>
+								{/if}
+							</p>
+						{/if}
 
 						{#if canViewLogs && deployment.log}
 							<div class="mt-3">
@@ -378,6 +567,28 @@
 									<pre class="mt-2 max-h-60 overflow-auto rounded-lg bg-zinc-950 border border-zinc-800 p-3 text-xs text-zinc-400 font-mono whitespace-pre-wrap">{deployment.log}</pre>
 								{/if}
 							</div>
+						{/if}
+
+						{#if canViewLogs && parseAuditIssues(deployment.auditIssues).length > 0}
+							<details class="mt-2">
+								<summary class="cursor-pointer text-xs font-medium text-zinc-500 transition-colors hover:text-zinc-300">
+									Site checks ({parseAuditIssues(deployment.auditIssues).length})
+								</summary>
+								<ul class="mt-2 space-y-1">
+									{#each parseAuditIssues(deployment.auditIssues) as issue}
+										<li class="flex items-start gap-2 text-xs">
+											<span
+												class="mt-1 h-1.5 w-1.5 shrink-0 rounded-full {issue.level === 'error'
+													? 'bg-red-400'
+													: issue.level === 'warn'
+														? 'bg-amber-400'
+														: 'bg-zinc-500'}"
+											></span>
+											<span class="text-zinc-400">{issue.message}</span>
+										</li>
+									{/each}
+								</ul>
+							</details>
 						{/if}
 
 						{#if deployment.errorMessage}
