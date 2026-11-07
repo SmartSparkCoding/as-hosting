@@ -161,3 +161,10 @@ export async function getStorageStats() {
 		}))
 	};
 }
+
+export async function setPreviewsEnabled(id: string, previewsEnabled: boolean) {
+	await db
+		.update(websites)
+		.set({ previewsEnabled, updatedAt: new Date() })
+		.where(eq(websites.id, id));
+}

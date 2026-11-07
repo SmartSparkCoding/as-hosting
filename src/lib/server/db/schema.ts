@@ -64,6 +64,9 @@ export const websites = pgTable('websites', {
 	visibility: siteVisibilityEnum('visibility').notNull().default('PUBLIC'),
 	accessPasswordHash: text('access_password_hash'),
 	showInPublicStats: boolean('show_in_public_stats').notNull().default(true),
+	previewsEnabled: boolean('previews_enabled').notNull().default(false),
+	previewOfId: uuid('preview_of_id'),
+	previewPr: integer('preview_pr'),
 	groupId: uuid('group_id').references(() => siteGroups.id, { onDelete: 'set null' }),
 	createdBy: uuid('created_by')
 		.notNull()

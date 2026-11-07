@@ -24,6 +24,7 @@
 	let visibilityChoice = $state<'PUBLIC' | 'UNLISTED' | 'PASSWORD'>('PUBLIC');
 	let accessPassword = $state('');
 	let showInPublicStats = $state(true);
+	let previewsEnabled = $state(false);
 	let visibilityInitialised = $state(false);
 	let thumbnailFailed = $state(false);
 
@@ -41,6 +42,7 @@
 		if (visibilityInitialised) return;
 		visibilityChoice = (website.visibility ?? 'PUBLIC') as 'PUBLIC' | 'UNLISTED' | 'PASSWORD';
 		showInPublicStats = website.showInPublicStats ?? true;
+		previewsEnabled = website.previewsEnabled ?? false;
 		visibilityInitialised = true;
 	});
 
@@ -426,6 +428,22 @@
 						class="h-4 w-4 accent-emerald-500"
 					/>
 					Count this site in the public club stats page
+				</label>
+
+				<label class="flex items-start gap-2 text-sm text-zinc-400">
+					<input
+						type="checkbox"
+						name="previewsEnabled"
+						bind:checked={previewsEnabled}
+						class="mt-0.5 h-4 w-4 accent-emerald-500"
+					/>
+					<span>
+						Give pull requests their own preview site
+						<span class="block text-xs text-zinc-500">
+							Opens at /pr-&lt;number&gt;-{website.slug}/ and is archived when the PR closes.
+							Needs the GitHub webhook.
+						</span>
+					</span>
 				</label>
 
 				<button

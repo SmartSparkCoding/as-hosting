@@ -29,6 +29,10 @@ AS Hosting is a management platform for Ashford School Hack Club with a public s
 - **Bulk deploy**: Paste a list of repositories and host the lot in one go
 - **Bulk actions**: Set visibility, archive, relaunch or move a whole section at once
 
+- **Sections** - group sites into a section with its own index page at `/<section>/`
+- **Bulk deploy** - paste a list of repositories and host them all in one go
+- **Bulk actions** - make public, unlist, password protect, archive or move a whole section at once
+- **Automatic deploys** - a push redeploys the site, and pull requests can get their own preview
 ## Tech Stack
 
 - **Frontend**: SvelteKit, TypeScript, Tailwind CSS
@@ -96,6 +100,8 @@ ANALYTICS_ALERTS_ENABLED=true
 ```
 
 After changing the schema, run `npm run db:push`. For deploy screenshots, run `npx playwright install chromium` once on the server; without it deploys still succeed and the preview card stays empty.
+
+| `GITHUB_WEBHOOK_SECRET` | No | Secret you type into the GitHub webhook. Without it the webhook endpoint returns 503. |
 
 ## First-Run Setup
 
@@ -201,6 +207,36 @@ A section is a named group of sites with its own index page. Sections and sites 
 - Section pages are not counted in analytics, since there is no site to attribute a view to.
 
 Sections are created from the bulk deploy form (name the section) or from the bulk actions panel (move into a section). Deleting a section leaves its sites alone; they simply become ungrouped.
+
+### Automatic deploys
+
+Set this up per repository, in **Settings → Webhooks → Add webhook**:
+
+| Field | Value |
+| --- | --- |
+| Payload URL | `https://as-hosting.dino.icu/api/github/webhook` |
+| Content type | `application/json` |
+| Secret | the same value as `GITHUB_WEBHOOK_SECRET` |
+| Events | "Just the push event" plus "Pull requests" |
+
+What happens then:
+
+- **Push to the default branch** redeploys every site pointing at that repository, with kind
+  `push` in the deployment history. Sites pointing at other branches are left alone, and a
+  push never touches a site you archived.
+- **Pull requests**, if the site has "Give pull requests their own preview site" ticked, get a
+  throwaway site at `/pr-<number>-<slug>/`. It is unlisted, kept out of the club stats, and
+  archived when the PR is closed, so a re-opened PR redeploys rather than re-cloning.
+- Previews keep the section of the site they came from, so a workshop section can preview all
+  of its sites at once.
+
+The endpoint verifies GitHub's `X-Hub-Signature-256` header against the secret and rejects
+anything else with a 401, so nobody can redeploy your sites by POSTing at it. Every event is
+acknowledged, including the ones that are ignored, so GitHub does not mark the webhook as
+failing and disable it.
+
+Deployments triggered by a push are attributed to whoever created the site, and a failed
+automatic deploy keeps the last working release live, exactly like the Redeploy button.
 
 ## Public stats
 
@@ -387,6 +423,8 @@ Add to crontab:
 - `GET /stats` - Public aggregate pageviews across public sites
 - `GET /privacy` - Public analytics privacy explainer
 - `GET /<section>/` - Section index page (public sites only)
+
+- `POST /api/github/webhook` - GitHub push and pull request events (signature verified)
 
 ## License
 
