@@ -12,9 +12,48 @@
 		languageName
 	} from '$lib/analytics';
 	import { PRODUCT_NAME } from '$lib/constants';
+	import { onMount } from 'svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
+
+	type LiveSnapshot = {
+		visitors: number;
+		pageviews: number;
+		windowMinutes: number;
+		paths: { path: string; count: number }[];
+	};
+
+	let live = $state<LiveSnapshot | null>(null);
+	let liveStale = $state(false);
+
+	onMount(() => {
+		let cancelled = false;
+		const POLL_MS = 20_000;
+
+		async function poll() {
+			try {
+				const response = await fetch(`/websites/${data.website.id}/analytics/live`, {
+					headers: { accept: 'application/json' }
+				});
+				if (!response.ok) throw new Error(`live stats ${response.status}`);
+				const snapshot = (await response.json()) as LiveSnapshot;
+				if (!cancelled) {
+					live = snapshot;
+					liveStale = false;
+				}
+			} catch {
+				if (!cancelled) liveStale = true;
+			}
+		}
+
+		poll();
+		const timer = setInterval(poll, POLL_MS);
+		return () => {
+			cancelled = true;
+			clearInterval(timer);
+		};
+	});
 
 	const report = $derived(data.report);
 	const totals = $derived(report.totals);
@@ -123,6 +162,52 @@
 			</p>
 		</div>
 	{/if}
+
+	<div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+		<div class="flex flex-wrap items-center justify-between gap-3">
+			<div class="flex items-center gap-2.5">
+				<span class="relative flex h-2.5 w-2.5">
+					{#if live && live.visitors > 0}
+						<span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60"></span>
+					{/if}
+					<span
+						class="relative inline-flex h-2.5 w-2.5 rounded-full {live && live.visitors > 0
+							? 'bg-emerald-400'
+							: 'bg-zinc-600'}"
+					></span>
+				</span>
+				<p class="text-sm text-zinc-300">
+					{#if !live}
+						Checking who is on the site...
+					{:else if live.visitors === 0}
+						<span class="text-zinc-400">Nobody on the site right now</span>
+					{:else}
+						<span class="font-semibold text-white">{formatNumber(live.visitors)}</span>
+						{live.visitors === 1 ? 'person' : 'people'} on the site
+						<span class="text-zinc-500">
+							&middot; {formatNumber(live.pageviews)} pageview{live.pageviews === 1 ? '' : 's'} in
+							the last {live.windowMinutes} minutes
+						</span>
+					{/if}
+				</p>
+			</div>
+			{#if liveStale}
+				<p class="text-xs text-amber-400/80">Live updates paused, retrying</p>
+			{/if}
+		</div>
+
+		{#if live && live.paths.length > 0}
+			<div class="mt-3 flex flex-wrap gap-2">
+				{#each live.paths as entry (entry.path)}
+					<span class="rounded-full bg-zinc-800/80 px-2.5 py-1 font-mono text-[11px] text-zinc-400">
+						{pageLabel(entry.path)}
+						<span class="text-zinc-600">·</span>
+						{entry.count}
+					</span>
+				{/each}
+			</div>
+		{/if}
+	</div>
 
 	<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
 		<StatCard label="Pageviews" value={formatNumber(totals.pageviews)} hint={`Last ${data.days} days`} accent />

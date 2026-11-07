@@ -90,6 +90,11 @@
 				Ask a club leader in the Ashford School Hack Club Slack workspace, or open an issue on
 				the hosting project's repository.
 			</p>
+			<div class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2">
+				<a href="/stats" class="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-400 hover:text-emerald-300">
+					See the public club stats
+				</a>
+			</div>
 			<a href="/" class="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-emerald-400 hover:text-emerald-300">
 				Back to {PRODUCT_NAME}
 				<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

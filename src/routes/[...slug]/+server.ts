@@ -5,6 +5,12 @@ import { recordAnalyticsEvent } from '$lib/server/services/analytics.service';
 import { normalisePath, hasDownloadExtension, parseUtm } from '$lib/server/analytics/collect';
 import { readCollectContext } from '$lib/server/analytics/request';
 import { HostingStorage } from '$lib/server/hosting/storage';
+import {
+	buildSiteAccessCookie,
+	checkSitePassword,
+	hasSiteAccess,
+	renderPasswordPage
+} from '$lib/server/hosting/site-access';
 import { readFile, stat } from 'node:fs/promises';
 import { join, normalize } from 'node:path';
 
@@ -71,9 +77,19 @@ function prepareHtml(
 	html: string,
 	basePath: string | null,
 	slug: string,
-	sitePath: string
+	sitePath: string,
+	noindex = false
 ): string {
 	let output = html;
+
+	if (noindex) {
+		const robots = '<meta name="robots" content="noindex, nofollow">';
+		if (/<head[^>]*>/i.test(output)) {
+			output = output.replace(/<head([^>]*)>/i, `<head$1>${robots}`);
+		} else {
+			output = `${robots}${output}`;
+		}
+	}
 
 	if (basePath) {
 		const base = `<base href="${escapeAttribute(basePath)}">`;
@@ -95,9 +111,7 @@ function prepareHtml(
 	return `${output}${script}`;
 }
 
-export const GET: RequestHandler = async ({ params, url, request, getClientAddress }) => {
-	const rawSlug = params.slug;
-
+function splitSlug(rawSlug: string | undefined): { slug: string; subPath: string } {
 	if (!rawSlug || !isPathSafe(rawSlug)) {
 		throw error(404, 'Not found');
 	}
@@ -110,6 +124,16 @@ export const GET: RequestHandler = async ({ params, url, request, getClientAddre
 		throw error(404, 'Not found');
 	}
 
+	return { slug, subPath };
+}
+
+function gateHeaders(extra: Record<string, string> = {}): Record<string, string> {
+	return { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow', ...extra };
+}
+
+export const GET: RequestHandler = async ({ params, url, request, cookies, getClientAddress }) => {
+	const { slug, subPath } = splitSlug(params.slug);
+
 	const website = await getWebsiteBySlug(slug);
 	if (!website) {
 		throw error(404, 'Website not found');
@@ -118,6 +142,38 @@ export const GET: RequestHandler = async ({ params, url, request, getClientAddre
 	if (website.status !== 'ACTIVE') {
 		throw error(404, 'Website not available');
 	}
+
+	const visibility = website.visibility ?? 'PUBLIC';
+	const passwordHash = website.accessPasswordHash ?? null;
+	const noindex = visibility !== 'PUBLIC';
+
+	if (visibility === 'PASSWORD' && !hasSiteAccess(cookies, slug, passwordHash)) {
+		const wantsHtml = (request.headers.get('accept') ?? '').includes('text/html');
+
+		if (!wantsHtml) {
+			return new Response('This site is password protected.', {
+				status: 401,
+				headers: gateHeaders({ 'Content-Type': 'text/plain; charset=utf-8' })
+			});
+		}
+
+		return new Response(
+			renderPasswordPage({ siteName: website.name, next: url.pathname + url.search }),
+			{
+				status: 401,
+				headers: gateHeaders({ 'Content-Type': 'text/html; charset=utf-8' })
+			}
+		);
+	}
+
+	const cacheFor = (publicMaxAge: number) =>
+		visibility === 'PUBLIC'
+			? `public, max-age=${publicMaxAge}`
+			: 'private, max-age=0, must-revalidate';
+
+	const robotsHeaders: Record<string, string> = noindex
+		? { 'X-Robots-Tag': 'noindex, nofollow' }
+		: {};
 
 	const sitePath = normalisePath(url.pathname.slice(slug.length + 1));
 	const context = readCollectContext(request, getClientAddress);
@@ -162,11 +218,12 @@ export const GET: RequestHandler = async ({ params, url, request, getClientAddre
 				const content = await readFile(indexPath, 'utf-8');
 				capture('pageview');
 				return new Response(
-					prepareHtml(content, directoryBaseHref(slug, sitePath), slug, sitePath),
+					prepareHtml(content, directoryBaseHref(slug, sitePath), slug, sitePath, noindex),
 					{
 						headers: {
 							'Content-Type': 'text/html',
-							'Cache-Control': 'public, max-age=300'
+							'Cache-Control': cacheFor(300),
+							...robotsHeaders
 						}
 					}
 				);
@@ -183,11 +240,12 @@ export const GET: RequestHandler = async ({ params, url, request, getClientAddre
 			const html = content.toString('utf-8');
 			capture('pageview');
 			return new Response(
-				prepareHtml(html, subPath ? null : `/${slug}/`, slug, sitePath),
+				prepareHtml(html, subPath ? null : `/${slug}/`, slug, sitePath, noindex),
 				{
 					headers: {
 						'Content-Type': mimeType,
-						'Cache-Control': 'public, max-age=60'
+						'Cache-Control': cacheFor(60),
+						...robotsHeaders
 					}
 				}
 			);
@@ -200,7 +258,8 @@ export const GET: RequestHandler = async ({ params, url, request, getClientAddre
 		return new Response(content, {
 			headers: {
 				'Content-Type': mimeType,
-				'Cache-Control': mimeType.startsWith('text/') ? 'public, max-age=60' : 'public, max-age=86400'
+				'Cache-Control': cacheFor(mimeType.startsWith('text/') ? 60 : 86400),
+				...robotsHeaders
 			}
 		});
 	} catch (e: any) {
@@ -208,4 +267,52 @@ export const GET: RequestHandler = async ({ params, url, request, getClientAddre
 		capture('not_found');
 		throw error(404, 'Not found');
 	}
+};
+
+/**
+ * Shared-password submissions land back on the page the visitor was trying to
+ * read. Everything else on a protected site is read-only, so this is the only
+ * POST this catch-all accepts.
+ */
+export const POST: RequestHandler = async ({ params, url, request, cookies, getClientAddress }) => {
+	const { slug } = splitSlug(params.slug);
+
+	const website = await getWebsiteBySlug(slug);
+	if (!website || website.status !== 'ACTIVE') {
+		throw error(404, 'Website not found');
+	}
+
+	if ((website.visibility ?? 'PUBLIC') !== 'PASSWORD') {
+		return new Response(null, { status: 303, headers: { Location: url.pathname } });
+	}
+
+	const passwordHash = website.accessPasswordHash ?? null;
+	const form = await request.formData();
+	const password = String(form.get('password') ?? '');
+	const result = await checkSitePassword(slug, password, passwordHash, getClientAddress());
+
+	if (!result.ok) {
+		const message = result.retryAfter
+			? `Too many tries. Wait ${Math.ceil(result.retryAfter / 60)} minute(s).`
+			: 'That password is not right.';
+
+		return new Response(
+			renderPasswordPage({ siteName: website.name, next: url.pathname + url.search, error: message }),
+			{
+				status: 401,
+				headers: gateHeaders({ 'Content-Type': 'text/html; charset=utf-8' })
+			}
+		);
+	}
+
+	const cookie = passwordHash ? buildSiteAccessCookie(slug, passwordHash) : null;
+
+	return new Response(null, {
+		status: 303,
+		headers: {
+			Location: url.pathname + url.search,
+			'Cache-Control': 'no-store',
+			...(cookie ? { 'Set-Cookie': cookie } : {})
+		}
+	});
 };

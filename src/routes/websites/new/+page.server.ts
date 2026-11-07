@@ -15,6 +15,8 @@ import { logAudit, AuditAction } from '$lib/server/services/audit.service';
 import { getUserById } from '$lib/server/services/user.service';
 import { createSlackNotifier, notifyDeploymentFailure } from '$lib/server/slack/notifier';
 import { RESERVED_SLUGS } from '$lib/constants';
+import { postDeployStatus } from '$lib/server/github/deploy-status';
+import { normalizeGitUrl } from '$lib/server/hosting/git-url';
 
 export const load: PageServerLoad = async ({ locals }) => {
 	if (!locals.user) throw redirect(302, '/login');
@@ -39,6 +41,14 @@ export const actions: Actions = {
 		if (!name) return fail(400, { error: 'Website name is required' });
 		if (!gitUrl) return fail(400, { error: 'Git repository URL is required' });
 		if (!gitUrl.startsWith('https://')) return fail(400, { error: 'Please use an HTTPS Git URL' });
+		let parsedGitUrl: string;
+		try {
+			parsedGitUrl = normalizeGitUrl(gitUrl);
+		} catch (err) {
+			return fail(400, {
+				error: err instanceof Error ? err.message : 'That repository URL is not supported'
+			});
+		}
 
 		const slug = rawSlug ? normalizeSlug(rawSlug) : normalizeSlug(name);
 		if (!slug) return fail(400, { error: 'Could not generate a valid slug from the name.' });
@@ -47,23 +57,65 @@ export const actions: Actions = {
 		if (await checkSlugExists(slug)) return fail(400, { error: 'A website with that slug already exists.' });
 
 		try {
-			const website = await createWebsite(name, slug, gitUrl, locals.user.id);
+			const website = await createWebsite(name, slug, parsedGitUrl, locals.user.id);
 			await logAudit(locals.user.id, AuditAction.WEBSITE_CREATED, `Created "${name}" (${slug})`);
 
 			const deployer = new Deployer();
 			await updateWebsiteStatus(website.id, 'BUILDING');
-			const result = await deployer.deploy(website.id, gitUrl);
+			const result = await deployer.deploy(website.id, parsedGitUrl);
+			const publicUrl = `${process.env.PUBLIC_BASE_URL || 'http://localhost:5173'}/${slug}/`;
 
 			if (result.success) {
 				const storage = new HostingStorage();
 				const bytes = await storage.getDirectorySize(storage.getCurrentPath(website.id));
 				await updateWebsiteStorage(website.id, bytes);
 				await updateWebsiteStatus(website.id, 'ACTIVE');
-				await createDeployment(website.id, locals.user.id, true, result.log);
+				const statusLine = await postDeployStatus({
+					gitUrl: parsedGitUrl,
+					commitSha: result.commitSha,
+					state: 'success',
+					description: `Deployed ${name}`,
+					targetUrl: publicUrl
+				}).catch(() => null);
+
+				await createDeployment(
+					website.id,
+					locals.user.id,
+					true,
+					statusLine ? `${result.log}\n${statusLine}` : result.log,
+					undefined,
+					{
+						kind: 'deploy',
+						release: result.release ?? null,
+						commitSha: result.commitSha ?? null,
+						commitMessage: result.commitMessage ?? null,
+						auditScore: result.audit?.score ?? null,
+						auditIssues: result.audit ? JSON.stringify(result.audit.issues) : null
+					}
+				);
 				await logAudit(locals.user.id, AuditAction.WEBSITE_DEPLOYED, `Deployed "${name}"`);
 			} else {
 				await updateWebsiteStatus(website.id, 'FAILED');
-				await createDeployment(website.id, locals.user.id, false, result.log, result.error);
+				const statusLine = await postDeployStatus({
+					gitUrl: parsedGitUrl,
+					commitSha: result.commitSha,
+					state: 'failure',
+					description: (result.error ?? 'Deploy failed').slice(0, 140),
+					targetUrl: publicUrl
+				}).catch(() => null);
+
+				await createDeployment(
+					website.id,
+					locals.user.id,
+					false,
+					statusLine ? `${result.log}\n${statusLine}` : result.log,
+					result.error,
+					{
+						kind: 'deploy',
+						commitSha: result.commitSha ?? null,
+						commitMessage: result.commitMessage ?? null
+					}
+				);
 				await logAudit(locals.user.id, AuditAction.WEBSITE_DEPLOYED, `Deployment failed for "${name}"`);
 
 				try {

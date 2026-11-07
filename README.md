@@ -17,6 +17,14 @@ AS Hosting is a management platform for Ashford School Hack Club with a public s
 - **Audit Log**: Track all administrative actions
 - **Slack Notifications**: Get notified about deployments and account changes
 - **Privacy-first analytics**: Cookie-free pageviews, referrers, devices, countries and engagement per site
+- **Live visitors**: See who is on a site in the last five minutes, refreshed while the report is open
+- **Slack alerts**: Get pinged about traffic spikes, 404 spikes and sites that suddenly went quiet
+- **Releases and rollback**: Every deploy is kept as a release, so a bad push can be undone in one click
+- **Site checks**: Each deploy scans the files for broken links, missing metadata and oversized assets
+- **Screenshot**: A preview of the site is captured after every deploy
+- **Commit statuses**: Deploy results are reported back to the GitHub repository
+- **Visibility**: Public, unlisted (noindex, hidden from stats) or shared-password sites
+- **Public stats**: A cookie-free club leaderboard of pageviews at `/stats`
 
 ## Tech Stack
 
@@ -73,7 +81,18 @@ SLACK_SIGNING_SECRET=
 
 # Optional: how long analytics rows are kept (7-365, default 90)
 ANALYTICS_RETENTION_DAYS=90
+
+# Optional: report deploy results to GitHub as commit statuses (repo:status scope)
+GITHUB_STATUS_TOKEN=
+
+# Optional: screenshot each site after deploy (needs a chromium install)
+THUMBNAILS_ENABLED=true
+
+# Optional: Slack alerts for spikes, 404s and silent sites
+ANALYTICS_ALERTS_ENABLED=true
 ```
+
+After changing the schema, run `npm run db:push`. For deploy screenshots, run `npx playwright install chromium` once on the server; without it deploys still succeed and the preview card stays empty.
 
 ## First-Run Setup
 
@@ -130,9 +149,34 @@ https://your-domain.com/<project-slug>/
 ## Managing Websites
 
 - **Redeploy**: Pull latest changes from Git
+- **Rollback**: Serve an earlier release again (see below)
 - **Archive**: Stop serving (files retained)
 - **Relaunch**: Restore archived site
 - **Delete**: Permanently remove archived files
+
+### Releases and rollback
+
+Each successful deploy is published into `data/websites/<id>/releases/<timestamp>/` and `current` is a symlink that is swapped atomically, so there is no window where a site 404s mid-deploy. Deployment history shows the commit, the release name and a **Rollback** button on any earlier successful release. The last five releases are kept; the active one is never pruned.
+
+### Site checks
+
+After the files are validated, `hosting/audit.ts` scans them for the problems that actually bite club sites: missing `<title>`, viewport or description, broken relative links, oversized images and assets, a bloated total size. It produces a score out of 100 and a list of issues, both shown on the deployment row. This is a static file check, not Lighthouse: no headless Chrome and no live URL is involved.
+
+### Screenshot
+
+`hosting/thumbnail.ts` serves the published files from a throwaway local server and screenshots the result with Playwright at 1200x630. The image is stored at `data/websites/<id>/thumb.png` and shown on the site page behind the normal site permission. A missing browser or a broken page never fails a deploy; the screenshot is just skipped and the log says so.
+
+### Commit statuses
+
+When `GITHUB_STATUS_TOKEN` is set, every deploy posts a commit status to `https://api.github.com/repos/<owner>/<repo>/statuses/<sha>` with the context `as-hosting/deploy`, linking to the live site. Non-GitHub remotes and deploys without a token are no-ops, so this works fine without any configuration.
+
+### Visibility
+
+Each site is **Public** (indexable, listed on `/stats`), **Unlisted** (served by link only, `noindex`, excluded from search and stats) or **Password** (a shared password is required before any file, including assets, is served). Unlisted and password sites also stop appearing in the public stats page, and the per-site "count in public stats" toggle can opt a public site out.
+
+## Public stats
+
+`/stats` is a public, no-login page with seven and thirty day pageview and visitor totals across public club sites, a sparkline, and a per-site leaderboard linking to each site. Only site-level totals leave the server: no paths, referrers, countries or visitor detail, and unlisted or password-protected sites never appear.
 
 ## Analytics
 
@@ -160,6 +204,20 @@ Requests are ignored entirely when the browser sends `DNT: 1` or `Sec-GPC: 1`, a
 1. `GET /<slug>/<path>` records a `pageview`, `download` (known file extension) or `not_found` row, fire-and-forget, so serving is never blocked.
 2. A `<script defer src="/__as-hosting/analytics.js">` tag is injected into served HTML (before `</body>`). It reports `engagement` (duration, scroll depth, viewport, language) and `outbound` (target host) to `POST /api/analytics`, using `navigator.sendBeacon` and no credentials.
 3. `/api/analytics` only accepts same-origin JSON under 2 KB, validates the site and its `ACTIVE` status, clamps every numeric field, and rate limits to 40 events per minute per source IP.
+
+### Live visitors
+
+The report polls `/websites/<id>/analytics/live` every 20 seconds for a five minute window: distinct visitor hashes, pageviews and the busiest paths. This is the one place where the daily-salted hash is compared across a boundary, and it is safe because the salt only rotates at UTC midnight, so a five minute window never spans two salts. In-memory only, nothing is stored.
+
+### Slack alerts
+
+A background check runs every ten minutes for ACTIVE sites and DMs the site creator (when Slack notifications are on):
+
+- **Traffic spike**: at least 20 pageviews in the last hour and four times the prior week's hourly average.
+- **404 spike**: at least 10 missing pages in the last hour and three times the baseline, because something is linked wrong.
+- **Traffic drop**: no pageviews in 24 hours after at least 10 the week before, which usually means the last deploy broke the site.
+
+Each alert has a cooldown (3 hours for spikes and 404s, 24 hours for drops) so a noisy site does not spam anyone. Set `ANALYTICS_ALERTS_ENABLED=false` to turn them off.
 
 ### Retention and maintenance
 
@@ -285,6 +343,10 @@ Add to crontab:
 - `POST /api/analytics` - Hosted-site engagement/outbound beacon (same-origin JSON, rate limited)
 - `GET /__as-hosting/analytics.js` - Analytics beacon script injected into hosted HTML
 - `GET /websites/<id>/analytics/export` - CSV export of a site's analytics
+- `GET /websites/<id>/analytics/live` - Live visitor snapshot for the last five minutes
+- `GET /websites/<id>/thumbnail` - Deploy screenshot (requires `VIEW_WEBSITE`)
+- `POST /<slug>/` - Password submission for password-protected sites (the only accepted write to the serve route)
+- `GET /stats` - Public aggregate pageviews across public sites
 - `GET /privacy` - Public analytics privacy explainer
 
 ## License

@@ -1,4 +1,4 @@
-import { eq, desc, sql } from 'drizzle-orm';
+import { eq, desc, and, sql } from 'drizzle-orm';
 import { db } from '../db';
 import { websites, deployments } from '../db/schema';
 
@@ -88,6 +88,59 @@ export async function deleteWebsite(id: string) {
 export async function checkSlugExists(slug: string): Promise<boolean> {
 	const [site] = await db.select().from(websites).where(eq(websites.slug, slug)).limit(1);
 	return !!site;
+}
+
+export type SiteVisibility = 'PUBLIC' | 'UNLISTED' | 'PASSWORD';
+
+/**
+ * PUBLIC: normal. UNLISTED: served, but noindex and kept out of public stats.
+ * PASSWORD: visitors must enter a shared password before the site is served.
+ */
+export async function setWebsiteVisibility(
+	id: string,
+	visibility: SiteVisibility,
+	accessPasswordHash: string | null
+) {
+	await db
+		.update(websites)
+		.set({ visibility, accessPasswordHash, updatedAt: new Date() })
+		.where(eq(websites.id, id));
+}
+
+export async function setShowInPublicStats(id: string, showInPublicStats: boolean) {
+	await db
+		.update(websites)
+		.set({ showInPublicStats, updatedAt: new Date() })
+		.where(eq(websites.id, id));
+}
+
+/** Active sites that may appear in the public club stats page. */
+export async function getPublicStatsWebsiteIds() {
+	const rows = await db
+		.select({ id: websites.id })
+		.from(websites)
+		.where(
+			and(
+				eq(websites.status, 'ACTIVE'),
+				eq(websites.visibility, 'PUBLIC'),
+				eq(websites.showInPublicStats, true)
+			)
+		);
+	return rows.map((row) => row.id);
+}
+
+/** Active, publicly listed sites that opted into the public club stats page. */
+export async function getPublicStatsWebsites() {
+	return db
+		.select({ id: websites.id, name: websites.name, slug: websites.slug })
+		.from(websites)
+		.where(
+			and(
+				eq(websites.status, 'ACTIVE'),
+				eq(websites.visibility, 'PUBLIC'),
+				eq(websites.showInPublicStats, true)
+			)
+		);
 }
 
 export async function getStorageStats() {
