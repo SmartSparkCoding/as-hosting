@@ -1,30 +1,73 @@
 import { redirect, fail } from '@sveltejs/kit';
 import type { PageServerLoad, Actions } from './$types';
+import { checkSlugExists } from '$lib/server/services/website.service';
+import type { SiteVisibility } from '$lib/server/services/website.service';
 import {
-	createWebsite,
-	checkSlugExists,
-	updateWebsiteStatus,
-	updateWebsiteStorage
-} from '$lib/server/services/website.service';
-import { countDeployments, createDeployment } from '$lib/server/services/deployment.service';
+	createGroup,
+	getAllGroups,
+	getGroupBySlug,
+	getTakenSlugs
+} from '$lib/server/services/group.service';
+import { provisionWebsite } from '$lib/server/services/site-provision.service';
 import { normalizeSlug, isValidSlug } from '$lib/utils';
 import { hasPermission, Permission } from '$lib/permissions';
-import { Deployer } from '$lib/server/hosting/deployer';
-import { HostingStorage } from '$lib/server/hosting/storage';
 import { logAudit, AuditAction } from '$lib/server/services/audit.service';
-import { getUserById } from '$lib/server/services/user.service';
-import { createSlackNotifier, notifyDeploymentFailure } from '$lib/server/slack/notifier';
+import { hashPassword } from '$lib/server/auth/password';
 import { RESERVED_SLUGS } from '$lib/constants';
-import { deployTargetUrl, postDeployStatus } from '$lib/server/github/deploy-status';
-import { normalizeGitUrl } from '$lib/server/hosting/git-url';
+import { normalizeGitUrl, parseGitHubRepo } from '$lib/server/hosting/git-url';
+import {
+	BULK_CONCURRENCY,
+	MAX_BULK_REPOS,
+	mapWithConcurrency,
+	nameFromRepo,
+	parseRepoLines,
+	slugFromRepo,
+	uniqueSlug
+} from '$lib/server/hosting/bulk-plan';
+
+const VISIBILITIES: SiteVisibility[] = ['PUBLIC', 'UNLISTED', 'PASSWORD'];
 
 export const load: PageServerLoad = async ({ locals }) => {
 	if (!locals.user) throw redirect(302, '/login');
 	if (!hasPermission(locals.user.role, Permission.CREATE_WEBSITE, locals.user.ambassadorPermission)) {
 		throw redirect(302, '/dashboard');
 	}
-	return {};
+
+	const groups = await getAllGroups().catch(() => []);
+
+	return {
+		groups: groups.map((group) => ({ name: group.name, slug: group.slug })),
+		maxBulk: MAX_BULK_REPOS
+	};
 };
+
+/** Shared by both forms: read the visibility controls and hash the password if needed. */
+async function readVisibility(formData: FormData): Promise<
+	| { ok: true; visibility: SiteVisibility; passwordHash: string | null; showInPublicStats: boolean }
+	| { ok: false; error: string }
+> {
+	const visibility = String(formData.get('visibility') ?? 'PUBLIC') as SiteVisibility;
+	const password = String(formData.get('accessPassword') ?? '');
+	const showInPublicStats = formData.get('showInPublicStats') === 'on';
+
+	if (!VISIBILITIES.includes(visibility)) {
+		return { ok: false, error: 'Unknown visibility option' };
+	}
+
+	if (visibility === 'PASSWORD') {
+		if (password.length < 6) {
+			return { ok: false, error: 'Use at least 6 characters for the site password' };
+		}
+		return {
+			ok: true,
+			visibility,
+			passwordHash: await hashPassword(password),
+			showInPublicStats: false
+		};
+	}
+
+	return { ok: true, visibility, passwordHash: null, showInPublicStats };
+}
 
 export const actions: Actions = {
 	default: async ({ request, locals }) => {
@@ -56,84 +99,180 @@ export const actions: Actions = {
 		if (RESERVED_SLUGS.includes(slug)) return fail(400, { error: 'That slug is reserved.' });
 		if (await checkSlugExists(slug)) return fail(400, { error: 'A website with that slug already exists.' });
 
+		const access = await readVisibility(formData);
+		if (!access.ok) return fail(400, { error: access.error });
+
 		try {
-			const website = await createWebsite(name, slug, parsedGitUrl, locals.user.id);
-			await logAudit(locals.user.id, AuditAction.WEBSITE_CREATED, `Created "${name}" (${slug})`);
+			const result = await provisionWebsite({
+				name,
+				slug,
+				gitUrl: parsedGitUrl,
+				userId: locals.user.id,
+				visibility: access.visibility,
+				accessPasswordHash: access.passwordHash,
+				showInPublicStats: access.showInPublicStats
+			});
 
-			const deployer = new Deployer();
-			await updateWebsiteStatus(website.id, 'BUILDING');
-			const result = await deployer.deploy(website.id, parsedGitUrl);
-			const publicUrl = `${process.env.PUBLIC_BASE_URL || 'http://localhost:5173'}/${slug}/`;
-			const deployNumber = (await countDeployments(website.id)) + 1;
-
-			if (result.success) {
-				const storage = new HostingStorage();
-				const bytes = await storage.getDirectorySize(storage.getCurrentPath(website.id));
-				await updateWebsiteStorage(website.id, bytes);
-				await updateWebsiteStatus(website.id, 'ACTIVE');
-				const statusLine = await postDeployStatus({
-					gitUrl: parsedGitUrl,
-					commitSha: result.commitSha,
-					state: 'success',
-					description: `Deployed ${name}`,
-					targetUrl: deployTargetUrl(publicUrl, deployNumber)
-				}).catch(() => null);
-
-				await createDeployment(
-					website.id,
-					locals.user.id,
-					true,
-					statusLine ? `${result.log}\n${statusLine}` : result.log,
-					undefined,
-					{
-						kind: 'deploy',
-						release: result.release ?? null,
-						commitSha: result.commitSha ?? null,
-						commitMessage: result.commitMessage ?? null,
-						auditScore: result.audit?.score ?? null,
-						auditIssues: result.audit ? JSON.stringify(result.audit.issues) : null
-					}
-				);
-				await logAudit(locals.user.id, AuditAction.WEBSITE_DEPLOYED, `Deployed "${name}"`);
-			} else {
-				await updateWebsiteStatus(website.id, 'FAILED');
-				const statusLine = await postDeployStatus({
-					gitUrl: parsedGitUrl,
-					commitSha: result.commitSha,
-					state: 'failure',
-					description: (result.error ?? 'Deploy failed').slice(0, 140),
-					targetUrl: publicUrl
-				}).catch(() => null);
-
-				await createDeployment(
-					website.id,
-					locals.user.id,
-					false,
-					statusLine ? `${result.log}\n${statusLine}` : result.log,
-					result.error,
-					{
-						kind: 'deploy',
-						commitSha: result.commitSha ?? null,
-						commitMessage: result.commitMessage ?? null
-					}
-				);
-				await logAudit(locals.user.id, AuditAction.WEBSITE_DEPLOYED, `Deployment failed for "${name}"`);
-
-				try {
-					const fullUser = await getUserById(locals.user.id);
-					if (fullUser) {
-						const notifier = createSlackNotifier();
-						await notifyDeploymentFailure(notifier, fullUser.slackId, name, result.error || 'Unknown error');
-					}
-				} catch {
-					// Slack notification failure is non-critical
-				}
-			}
-
-			return { success: true, websiteId: website.id, deployed: result.success };
+			return { success: true, websiteId: result.websiteId, deployed: result.deployed };
 		} catch (err) {
 			const message = err instanceof Error ? err.message : 'An unexpected error occurred';
 			return fail(500, { error: message });
 		}
+	},
+
+	/**
+	 * Bulk deploy: paste one repository per line, optionally drop them all into a
+	 * section, and deploy them a few at a time. Every line gets its own result so
+	 * one broken repo cannot take the batch down with it.
+	 */
+	bulk: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Not authenticated' });
+		if (!hasPermission(locals.user.role, Permission.CREATE_WEBSITE, locals.user.ambassadorPermission)) {
+			return fail(403, { error: 'Permission denied' });
+		}
+
+		const formData = await request.formData();
+		const rawInput = String(formData.get('repos') ?? '');
+		const groupName = String(formData.get('groupName') ?? '').trim();
+
+		const repos = parseRepoLines(rawInput, MAX_BULK_REPOS + 1);
+		if (repos.length === 0) {
+			return fail(400, { error: 'Paste at least one repository URL, one per line.' });
+		}
+		if (repos.length > MAX_BULK_REPOS) {
+			return fail(400, {
+				error: `That is more than ${MAX_BULK_REPOS} repositories. Split it into a few batches.`
+			});
+		}
+
+		const access = await readVisibility(formData);
+		if (!access.ok) return fail(400, { error: access.error });
+
+		// One section for the whole batch, reused if it already exists so a
+		// workshop can add more sites later.
+		let group: { id: string; name: string; slug: string } | null = null;
+		if (groupName) {
+			const groupSlug = normalizeSlug(groupName);
+			if (!groupSlug || !isValidSlug(groupSlug)) {
+				return fail(400, { error: 'Use lowercase letters, numbers and hyphens for the section name.' });
+			}
+			const existing = await getGroupBySlug(groupSlug);
+			group = existing
+				? { id: existing.id, name: existing.name, slug: existing.slug }
+				: await createGroup(groupName, groupSlug, locals.user.id).then((created) => ({
+						id: created.id,
+						name: created.name,
+						slug: created.slug
+					}));
+		}
+
+		const taken = await getTakenSlugs();
+
+		interface BulkItem {
+			input: string;
+			slug: string | null;
+			name: string | null;
+			status: 'deployed' | 'created' | 'failed' | 'skipped';
+			message: string;
+			websiteId?: string;
+		}
+
+		const prepared = repos.map<BulkItem & { gitUrl?: string; base?: string }>((input) => {
+			let gitUrl: string;
+			try {
+				gitUrl = normalizeGitUrl(input);
+			} catch (err) {
+				return {
+					input,
+					slug: null,
+					name: null,
+					status: 'failed',
+					message: err instanceof Error ? err.message : 'Unsupported repository URL'
+				};
+			}
+
+			const repoName =
+				parseGitHubRepo(gitUrl)?.repo ?? gitUrl.replace(/\.git$/i, '').split('/').pop() ?? '';
+			let base = slugFromRepo(repoName);
+			if (!base) {
+				return {
+					input,
+					slug: null,
+					name: null,
+					status: 'failed',
+					message: 'Could not work out a slug from that repository name'
+				};
+			}
+			if (RESERVED_SLUGS.includes(base)) base = `${base}-site`;
+
+			const slug = uniqueSlug(base, taken);
+			taken.add(slug);
+
+			return {
+				input,
+				slug,
+				name: nameFromRepo(repoName),
+				status: 'skipped',
+				message: '',
+				gitUrl,
+				base
+			};
+		});
+
+		const results = await mapWithConcurrency(prepared, BULK_CONCURRENCY, async (item) => {
+			if (!item.gitUrl || !item.slug || !item.name) return item;
+
+			try {
+				const result = await provisionWebsite({
+					name: item.name,
+					slug: item.slug,
+					gitUrl: item.gitUrl,
+					userId: locals.user!.id,
+					groupId: group?.id ?? null,
+					visibility: access.visibility,
+					accessPasswordHash: access.passwordHash,
+					showInPublicStats: access.showInPublicStats
+				});
+
+				return {
+					...item,
+					websiteId: result.websiteId,
+					status: result.deployed ? ('deployed' as const) : ('failed' as const),
+					message: result.deployed ? 'Live' : result.error ?? 'Deploy failed'
+				};
+			} catch (err) {
+				return {
+					...item,
+					status: 'failed' as const,
+					message: err instanceof Error ? err.message : 'Unexpected error'
+				};
+			}
+		});
+
+		const deployed = results.filter((item) => item.status === 'deployed').length;
+		const failed = results.filter((item) => item.status === 'failed').length;
+
+		await logAudit(
+			locals.user.id,
+			AuditAction.WEBSITE_CREATED,
+			`Bulk deploy: ${deployed}/${results.length} live${group ? ` in "${group.name}"` : ''}` +
+				(failed ? `, ${failed} failed` : '')
+		);
+
+		return {
+			bulk: {
+				group,
+				deployed,
+				failed,
+				items: results.map((item) => ({
+					input: item.input,
+					slug: item.slug,
+					name: item.name,
+					status: item.status,
+					message: item.message,
+					websiteId: item.websiteId
+				}))
+			}
+		};
 	}
 };
