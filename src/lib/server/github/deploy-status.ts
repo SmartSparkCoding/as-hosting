@@ -28,6 +28,23 @@ export function deployStatusEnabled(): boolean {
 	return Boolean(token());
 }
 
+/**
+ * The link GitHub shows on the check. Carries campaign tags so the site's own
+ * analytics can tell how many visits came from someone clicking the check,
+ * one campaign per deploy. Only used for successful deploys: a failure has
+ * nothing new to look at, and clicks would land on the previous release.
+ */
+export function deployTargetUrl(publicUrl: string, deployNumber: number): string {
+	try {
+		const url = new URL(publicUrl);
+		url.searchParams.set('utm_source', 'github');
+		url.searchParams.set('utm_campaign', `deploy-${deployNumber}`);
+		return url.toString();
+	} catch {
+		return publicUrl;
+	}
+}
+
 export async function postDeployStatus(input: DeployStatusInput): Promise<string | null> {
 	const repoRef = parseGitHubRepo(input.gitUrl);
 	if (!repoRef) return null;

@@ -6,7 +6,7 @@ import {
 	updateWebsiteStatus,
 	updateWebsiteStorage
 } from '$lib/server/services/website.service';
-import { createDeployment } from '$lib/server/services/deployment.service';
+import { countDeployments, createDeployment } from '$lib/server/services/deployment.service';
 import { normalizeSlug, isValidSlug } from '$lib/utils';
 import { hasPermission, Permission } from '$lib/permissions';
 import { Deployer } from '$lib/server/hosting/deployer';
@@ -15,7 +15,7 @@ import { logAudit, AuditAction } from '$lib/server/services/audit.service';
 import { getUserById } from '$lib/server/services/user.service';
 import { createSlackNotifier, notifyDeploymentFailure } from '$lib/server/slack/notifier';
 import { RESERVED_SLUGS } from '$lib/constants';
-import { postDeployStatus } from '$lib/server/github/deploy-status';
+import { deployTargetUrl, postDeployStatus } from '$lib/server/github/deploy-status';
 import { normalizeGitUrl } from '$lib/server/hosting/git-url';
 
 export const load: PageServerLoad = async ({ locals }) => {
@@ -64,6 +64,7 @@ export const actions: Actions = {
 			await updateWebsiteStatus(website.id, 'BUILDING');
 			const result = await deployer.deploy(website.id, parsedGitUrl);
 			const publicUrl = `${process.env.PUBLIC_BASE_URL || 'http://localhost:5173'}/${slug}/`;
+			const deployNumber = (await countDeployments(website.id)) + 1;
 
 			if (result.success) {
 				const storage = new HostingStorage();
@@ -75,7 +76,7 @@ export const actions: Actions = {
 					commitSha: result.commitSha,
 					state: 'success',
 					description: `Deployed ${name}`,
-					targetUrl: publicUrl
+					targetUrl: deployTargetUrl(publicUrl, deployNumber)
 				}).catch(() => null);
 
 				await createDeployment(
