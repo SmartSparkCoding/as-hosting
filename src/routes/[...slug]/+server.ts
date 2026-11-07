@@ -1,10 +1,12 @@
 import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getWebsiteBySlug } from '$lib/server/services/website.service';
+import { getGroupBySlug, getWebsitesInGroup } from '$lib/server/services/group.service';
 import { recordAnalyticsEvent } from '$lib/server/services/analytics.service';
 import { normalisePath, hasDownloadExtension, parseUtm } from '$lib/server/analytics/collect';
 import { readCollectContext } from '$lib/server/analytics/request';
 import { HostingStorage } from '$lib/server/hosting/storage';
+import { renderSectionPage } from '$lib/server/hosting/section-page';
 import {
 	buildSiteAccessCookie,
 	checkSitePassword,
@@ -131,11 +133,67 @@ function gateHeaders(extra: Record<string, string> = {}): Record<string, string>
 	return { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow', ...extra };
 }
 
+/**
+ * A slug that belongs to no site may belong to a section (a group of sites).
+ *
+ *   /<section>/            -> index page listing the section's public sites
+ *   /<section>/<site>/     -> 302 to the site itself
+ *
+ * Sections share one namespace with sites, so a section can never shadow a
+ * site: this only runs after the site lookup came back empty.
+ */
+async function handleSectionRequest(
+	slug: string,
+	subPath: string,
+	url: URL
+): Promise<Response | null> {
+	const group = await getGroupBySlug(slug);
+	if (!group) return null;
+
+	const rest = subPath.replace(/\/+$/, '');
+
+	if (rest) {
+		// Only one level deep: /<section>/<site>, never /<section>/<site>/<file>.
+		if (rest.includes('/')) return null;
+
+		const target = await getWebsiteBySlug(rest);
+		if (!target || target.groupId !== group.id || target.status !== 'ACTIVE') return null;
+
+		return new Response(null, {
+			status: 302,
+			headers: { Location: `/${rest}/${url.search}`, 'Cache-Control': 'no-store' }
+		});
+	}
+
+	const sites = await getWebsitesInGroup(group.id);
+	const listed = sites
+		.filter((site) => site.status === 'ACTIVE' && (site.visibility ?? 'PUBLIC') === 'PUBLIC')
+		.map((site) => ({ name: site.name, slug: site.slug }));
+
+	const hidesSomething = sites.some(
+		(site) => site.status === 'ACTIVE' && (site.visibility ?? 'PUBLIC') !== 'PUBLIC'
+	);
+
+	return new Response(
+		renderSectionPage({ groupName: group.name, description: group.description, sites: listed }),
+		{
+			headers: {
+				'Content-Type': 'text/html; charset=utf-8',
+				'Cache-Control': 'public, max-age=60',
+				...(hidesSomething ? { 'X-Robots-Tag': 'noindex, nofollow' } : {})
+			}
+		}
+	);
+}
+
 export const GET: RequestHandler = async ({ params, url, request, cookies, getClientAddress }) => {
 	const { slug, subPath } = splitSlug(params.slug);
 
 	const website = await getWebsiteBySlug(slug);
 	if (!website) {
+		const section = await handleSectionRequest(slug, subPath, url);
+		if (section) return section;
+
 		throw error(404, 'Website not found');
 	}
 

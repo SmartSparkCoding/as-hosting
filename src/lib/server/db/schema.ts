@@ -39,6 +39,21 @@ export const sessions = pgTable('sessions', {
 	createdAt: timestamp('created_at').notNull().defaultNow()
 });
 
+/**
+ * A section (group) of websites, e.g. one workshop or one club year. Sites in a
+ * section are grouped together in the dashboard, and the section gets its own
+ * index page at /<section-slug>.
+ */
+export const siteGroups = pgTable('site_groups', {
+	id: uuid('id').primaryKey().defaultRandom(),
+	name: varchar('name', { length: 255 }).notNull(),
+	slug: varchar('slug', { length: 255 }).notNull().unique(),
+	description: text('description'),
+	createdBy: uuid('created_by').references(() => users.id),
+	createdAt: timestamp('created_at').notNull().defaultNow(),
+	updatedAt: timestamp('updated_at').notNull().defaultNow()
+});
+
 export const websites = pgTable('websites', {
 	id: uuid('id').primaryKey().defaultRandom(),
 	name: varchar('name', { length: 255 }).notNull(),
@@ -49,6 +64,7 @@ export const websites = pgTable('websites', {
 	visibility: siteVisibilityEnum('visibility').notNull().default('PUBLIC'),
 	accessPasswordHash: text('access_password_hash'),
 	showInPublicStats: boolean('show_in_public_stats').notNull().default(true),
+	groupId: uuid('group_id').references(() => siteGroups.id, { onDelete: 'set null' }),
 	createdBy: uuid('created_by')
 		.notNull()
 		.references(() => users.id),

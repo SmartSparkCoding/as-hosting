@@ -25,6 +25,9 @@ AS Hosting is a management platform for Ashford School Hack Club with a public s
 - **Commit statuses**: Deploy results are reported back to the GitHub repository
 - **Visibility**: Public, unlisted (noindex, hidden from stats) or shared-password sites
 - **Public stats**: A cookie-free club leaderboard of pageviews at `/stats`
+- **Sections**: Group sites into a section with its own index page at `/<section>/`
+- **Bulk deploy**: Paste a list of repositories and host the lot in one go
+- **Bulk actions**: Set visibility, archive, relaunch or move a whole section at once
 
 ## Tech Stack
 
@@ -146,6 +149,16 @@ Once deployed, your site is live at:
 https://your-domain.com/<project-slug>/
 ```
 
+### Bulk deploy
+
+Workshops mean twenty repositories at once, so `/websites/new` has a **Bulk deploy** tab. Paste one repository URL per line (blank lines and `#` comments are ignored), pick a section name and a visibility, and every repository is deployed in turn.
+
+- Up to 25 repositories per batch, three deploying at a time.
+- The slug comes from the repository name, and gets `-2`, `-3`, ... appended if that slug is already used.
+- The display name is the repository name with dashes turned into spaces.
+- Each line reports its own result, so one broken repository never fails the batch.
+- Passing the same section name again adds the new sites to the existing section.
+
 ## Managing Websites
 
 - **Redeploy**: Pull latest changes from Git
@@ -153,6 +166,10 @@ https://your-domain.com/<project-slug>/
 - **Archive**: Stop serving (files retained)
 - **Relaunch**: Restore archived site
 - **Delete**: Permanently remove archived files
+
+### Bulk actions
+
+Tick sites on `/websites` and use the panel at the top, or use a section's own **Section bulk actions** menu to hit every site in it. Both run the same code path as the single-site buttons: make public, make unlisted, password protect (one shared password for the batch), archive, relaunch, move into a section or remove from one. Anything that cannot be applied (already archived, no archived copy to relaunch) is listed as skipped instead of failing the batch.
 
 ### Releases and rollback
 
@@ -173,6 +190,17 @@ When `GITHUB_STATUS_TOKEN` is set, every deploy posts a commit status to `https:
 ### Visibility
 
 Each site is **Public** (indexable, listed on `/stats`), **Unlisted** (served by link only, `noindex`, excluded from search and stats) or **Password** (a shared password is required before any file, including assets, is served). Unlisted and password sites also stop appearing in the public stats page, and the per-site "count in public stats" toggle can opt a public site out.
+
+### Sections
+
+A section is a named group of sites with its own index page. Sections and sites share one slug namespace, so a section can never shadow a site (a site named `workshop` always wins at `/workshop/`).
+
+- `/<section>/` lists the section's sites as cards. Only active, public sites appear; unlisted and password-protected sites are never advertised.
+- `/<section>/<site>/` redirects to `/<site>/`, so a link to a site inside a section still works.
+- The section index is indexable unless the section holds an unlisted or password-protected site, in which case it gets `X-Robots-Tag: noindex, nofollow` so hidden slugs cannot leak through it.
+- Section pages are not counted in analytics, since there is no site to attribute a view to.
+
+Sections are created from the bulk deploy form (name the section) or from the bulk actions panel (move into a section). Deleting a section leaves its sites alone; they simply become ungrouped.
 
 ## Public stats
 
@@ -358,6 +386,7 @@ Add to crontab:
 - `POST /<slug>/` - Password submission for password-protected sites (the only accepted write to the serve route)
 - `GET /stats` - Public aggregate pageviews across public sites
 - `GET /privacy` - Public analytics privacy explainer
+- `GET /<section>/` - Section index page (public sites only)
 
 ## License
 
