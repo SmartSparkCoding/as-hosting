@@ -200,7 +200,9 @@ export const actions: Actions = {
 
 		const formData = await request.formData();
 		const visibility = String(formData.get('visibility') ?? '') as SiteVisibility;
-		const password = String(formData.get('password') ?? '');
+		// The form field is `accessPassword`; keep them in step or the password
+		// silently arrives empty and PASSWORD mode looks broken.
+		const password = String(formData.get('accessPassword') ?? '');
 		const showInPublicStats = formData.get('showInPublicStats') === 'on';
 
 		if (!['PUBLIC', 'UNLISTED', 'PASSWORD'].includes(visibility)) {
