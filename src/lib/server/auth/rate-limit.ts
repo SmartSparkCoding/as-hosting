@@ -17,6 +17,18 @@ function cleanup(): void {
 	}
 }
 
+/**
+ * Clears the counter for an identifier after a successful sign in.
+ *
+ * The limiter counts attempts before it knows whether the password was right,
+ * so without this a member who signs in from a few devices, or retries while
+ * the site is half broken, burns their five tries and gets locked out even
+ * though every attempt succeeded.
+ */
+export function resetLoginRateLimit(identifier: string): void {
+	attempts.delete(identifier);
+}
+
 export function checkLoginRateLimit(identifier: string): { allowed: boolean; retryAfter?: number } {
 	cleanup();
 

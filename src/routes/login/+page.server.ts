@@ -3,7 +3,7 @@ import type { PageServerLoad, Actions } from './$types';
 import { getAllActiveLoginUsers, getUserById, updatePassword } from '$lib/server/services/user.service';
 import { verifyPassword } from '$lib/server/auth/password';
 import { createSession } from '$lib/server/auth/session';
-import { checkLoginRateLimit } from '$lib/server/auth/rate-limit';
+import { checkLoginRateLimit, resetLoginRateLimit } from '$lib/server/auth/rate-limit';
 import { logAudit, AuditAction } from '$lib/server/services/audit.service';
 import { SESSION_COOKIE_NAME } from '$lib/constants';
 import { db } from '$lib/server/db';
@@ -53,6 +53,9 @@ export const actions: Actions = {
 
 		const valid = await verifyPassword(password, user.passwordHash);
 		if (!valid) return fail(400, { error: 'Incorrect password' });
+
+		// A good sign in should not count towards the lockout budget.
+		resetLoginRateLimit(name);
 
 		const sessionId = await createSession(user.id);
 		cookies.set(SESSION_COOKIE_NAME, sessionId, {

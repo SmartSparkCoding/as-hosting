@@ -134,10 +134,24 @@
 {:else}
 	<div class="min-h-screen bg-zinc-950 text-zinc-100">
 		<header class="sticky top-0 z-50 h-[60px] border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-md">
-			<div class="mx-auto flex h-full max-w-6xl items-center px-4">
+			<div class="mx-auto flex h-full max-w-6xl items-center justify-between px-4">
 				<a href="/" class="text-lg font-bold tracking-tight text-white">
 					AS Hosting
 				</a>
+				<nav class="flex items-center gap-6 text-sm">
+					<a
+						href="/stats"
+						class="hidden text-zinc-400 transition-colors hover:text-white sm:block"
+					>
+						Club stats
+					</a>
+					<a
+						href="/login"
+						class="rounded-lg bg-emerald-500 px-3.5 py-1.5 text-sm font-semibold text-zinc-950 transition-transform hover:bg-emerald-400 active:translate-y-px"
+					>
+						Log in
+					</a>
+				</nav>
 			</div>
 		</header>
 

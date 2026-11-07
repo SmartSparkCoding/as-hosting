@@ -64,6 +64,10 @@ export const actions: Actions = {
 		const website = await getWebsiteById(params.id);
 		if (!website) return fail(404, { error: 'Website not found' });
 
+		// Remember what the site was before this attempt: a failed redeploy of a
+		// site that was already live must leave it live, not flip it to FAILED.
+		const previousStatus = website.status;
+
 		await updateWebsiteStatus(website.id, 'BUILDING');
 		await logAudit(locals.user.id, AuditAction.WEBSITE_DEPLOYED, `Redeploying "${website.name}"`);
 
@@ -102,13 +106,9 @@ export const actions: Actions = {
 				}
 			);
 		} else {
-			const existingSite = await getWebsiteById(website.id);
-			if (existingSite && existingSite.status !== 'BUILDING') {
-				// Had a live version, keep it active
-				await updateWebsiteStatus(website.id, existingSite.status as 'ACTIVE');
-			} else {
-				await updateWebsiteStatus(website.id, 'FAILED');
-			}
+			// Had a live version, keep it live; otherwise record the failure.
+			const keepLive = previousStatus === 'ACTIVE' || previousStatus === 'ARCHIVED';
+			await updateWebsiteStatus(website.id, keepLive ? previousStatus : 'FAILED');
 
 			const statusLine = await postDeployStatus({
 				gitUrl: website.gitUrl,
