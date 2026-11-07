@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pull, install, build, restart AS Hosting, then report which environment
+# Pull, install, push the database schema, build, restart AS Hosting, then report which environment
 # variables the running app actually sees. Key names and set/empty only, so it
 # is safe to run in a shared terminal or paste into a chat.
 set -euo pipefail
@@ -25,6 +25,9 @@ fi
 
 echo "==> Installing dependencies"
 npm install --no-audit --no-fund 2>&1 | tail -3
+
+echo "==> Applying database schema"
+npm run db:push 2>&1 | tail -5
 
 echo "==> Building"
 npm run build 2>&1 | grep -vE "^\s*(- |\[PLUGIN_TIMINGS\]|Those rows|Measured inside|Not measurable|See https://rolldown)" | tail -5

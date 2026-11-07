@@ -20,6 +20,7 @@ import {
 import { HostingStorage } from '$lib/server/hosting/storage';
 import { hashPassword } from '$lib/server/auth/password';
 import { AuditAction, logAudit } from '$lib/server/services/audit.service';
+import { reindexWebsite, removeFromIndex } from '$lib/server/services/search.service';
 import { hasPermission, Permission } from '$lib/permissions';
 import { RESERVED_SLUGS } from '$lib/constants';
 import { isValidSlug, normalizeSlug } from '$lib/utils';
@@ -115,6 +116,7 @@ async function runBulk(
 					// Nothing published yet, nothing to move aside.
 				}
 				await archiveWebsite(website.id);
+				await removeFromIndex(website.id).catch(() => undefined);
 				done.push(website.name);
 				continue;
 			}
@@ -132,6 +134,7 @@ async function runBulk(
 				}
 				await relaunchWebsite(website.id);
 				await updateWebsiteStatus(website.id, 'ACTIVE');
+				await reindexWebsite(website.id).catch(() => undefined);
 				done.push(website.name);
 				continue;
 			}
@@ -146,6 +149,11 @@ async function runBulk(
 			const visibility = op === 'public' ? 'PUBLIC' : op === 'unlisted' ? 'UNLISTED' : 'PASSWORD';
 			await setWebsiteVisibility(website.id, visibility, op === 'password' ? accessPasswordHash : null);
 			if (op !== 'public') await setShowInPublicStats(website.id, false);
+			if (op === 'public') {
+				await reindexWebsite(website.id).catch(() => undefined);
+			} else {
+				await removeFromIndex(website.id).catch(() => undefined);
+			}
 			done.push(website.name);
 		} catch (err) {
 			skipped.push({

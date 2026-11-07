@@ -8,8 +8,10 @@ import {
 	integer,
 	pgEnum,
 	bigserial,
-	index
+	index,
+	uniqueIndex
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 export const userRoleEnum = pgEnum('user_role', ['MAIN_LEADER', 'CO_LEADER', 'AMBASSADOR']);
 export const ambassadorPermEnum = pgEnum('ambassador_permission', ['VIEWER', 'LEADER']);
@@ -157,5 +159,31 @@ export const analyticsEvents = pgTable(
 			table.createdAt
 		),
 		index('analytics_events_website_path_idx').on(table.websiteId, table.path)
+	]
+);
+
+/**
+ * Plain text of every page served from a site's current release, used by the
+ * club-wide search. Only active public sites are indexed; unlisted and
+ * password protected sites never enter the table.
+ */
+export const searchDocuments = pgTable(
+	'search_documents',
+	{
+		id: uuid('id').primaryKey().defaultRandom(),
+		websiteId: uuid('website_id')
+			.notNull()
+			.references(() => websites.id, { onDelete: 'cascade' }),
+		path: varchar('path', { length: 512 }).notNull(),
+		title: varchar('title', { length: 300 }).notNull(),
+		body: text('body').notNull(),
+		indexedAt: timestamp('indexed_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(table) => [
+		uniqueIndex('search_documents_website_path_idx').on(table.websiteId, table.path),
+		index('search_documents_body_idx').using(
+			'gin',
+			sql`to_tsvector('english', ${table.title} || ' ' || ${table.body})`
+		)
 	]
 );

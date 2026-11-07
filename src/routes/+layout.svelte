@@ -13,7 +13,8 @@
 	let navLinks = $derived.by(() => {
 		const links = [
 			{ href: '/dashboard', label: 'Dashboard' },
-			{ href: '/websites', label: 'Websites' }
+			{ href: '/websites', label: 'Websites' },
+			{ href: '/search', label: 'Search' }
 		];
 
 		if (data.user?.role === 'MAIN_LEADER') {

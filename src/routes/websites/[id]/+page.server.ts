@@ -17,6 +17,7 @@ import { getWebsiteAnalyticsHighlights, emptyAnalyticsHighlight } from '$lib/ser
 import { HostingStorage } from '$lib/server/hosting/storage';
 import { hasPermission, Permission } from '$lib/permissions';
 import { logAudit, AuditAction } from '$lib/server/services/audit.service';
+import { reindexWebsite, removeFromIndex } from '$lib/server/services/search.service';
 import { hashPassword } from '$lib/server/auth/password';
 import { redeployWebsite } from '$lib/server/services/redeploy.service';
 import { formatBytes } from '$lib/utils';
@@ -100,6 +101,8 @@ export const actions: Actions = {
 		await updateWebsiteStorage(website.id, bytes);
 		await updateWebsiteStatus(website.id, 'ACTIVE');
 
+		await reindexWebsite(website.id).catch(() => undefined);
+
 		const log = `Rolled back to release ${release} (${formatBytes(bytes)}).`;
 		await createDeployment(website.id, locals.user.id, true, log, undefined, {
 			kind: 'rollback',
@@ -155,6 +158,11 @@ export const actions: Actions = {
 		} else {
 			await setShowInPublicStats(website.id, false);
 		}
+		if (visibility === 'PUBLIC') {
+			await reindexWebsite(website.id).catch(() => undefined);
+		} else {
+			await removeFromIndex(website.id).catch(() => undefined);
+		}
 		await logAudit(
 			locals.user.id,
 			AuditAction.WEBSITE_VISIBILITY_CHANGED,
@@ -190,6 +198,7 @@ export const actions: Actions = {
 			// Archive might fail if no current directory exists
 		}
 		await archiveWebsite(website.id);
+		await removeFromIndex(website.id).catch(() => undefined);
 		await logAudit(locals.user.id, AuditAction.WEBSITE_ARCHIVED, `Archived "${website.name}"`);
 
 		return { success: true };
@@ -218,6 +227,7 @@ export const actions: Actions = {
 
 		await relaunchWebsite(website.id, expiresAt);
 		await updateWebsiteStatus(website.id, 'ACTIVE');
+		await reindexWebsite(website.id).catch(() => undefined);
 		await logAudit(locals.user.id, AuditAction.WEBSITE_RELAUNCHED, `Relaunched "${website.name}"`);
 
 		return { success: true };

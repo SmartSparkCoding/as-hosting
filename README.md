@@ -29,11 +29,9 @@ AS Hosting is a management platform for Ashford School Hack Club with a public s
 - **Bulk deploy**: Paste a list of repositories and host the lot in one go
 - **Bulk actions**: Set visibility, archive, relaunch or move a whole section at once
 - **Landing page**: Logged out visitors get a public page at `/` with the club's live numbers and newest sites
+- **Automatic deploys**: A push to the repository redeploys the site, and pull requests can get a preview
+- **Search**: Full text search over the words on every public club site, at `/search`
 
-- **Sections** - group sites into a section with its own index page at `/<section>/`
-- **Bulk deploy** - paste a list of repositories and host them all in one go
-- **Bulk actions** - make public, unlist, password protect, archive or move a whole section at once
-- **Automatic deploys** - a push redeploys the site, and pull requests can get their own preview
 ## Tech Stack
 
 - **Frontend**: SvelteKit, TypeScript, Tailwind CSS
@@ -239,6 +237,24 @@ failing and disable it.
 Deployments triggered by a push are attributed to whoever created the site, and a failed
 automatic deploy keeps the last working release live, exactly like the Redeploy button.
 
+## Search
+
+`/search` looks through the readable text of every active public site, and only the text: markup,
+scripts and styles are stripped out when a page is indexed, so a result can never leak a script tag
+or an attribute value.
+
+The index is rebuilt for a site after each successful deploy, and on rollback or relaunch so the
+index follows the release that is actually being served. Archiving a site, or moving it to unlisted
+or password protected, removes it from the index straight away. The **Rebuild index** button on the
+search page re-crawls every public site, and needs `EDIT_WEBSITE` permission.
+
+Limits per site: 200 pages, 20,000 characters of text per page, and 40 results per search. Search
+uses Postgres full text search (`websearch_to_tsquery`, so quotes and `or` work), and the
+`search_documents` table is created by `npm run db:push` like everything else.
+
+Searching is for club members only: the page sits behind the login, and unlisted or password
+protected sites are excluded in the query itself, not just hidden in the UI.
+
 ## Public stats
 
 `/stats` is a public, no-login page with seven and thirty day pageview and visitor totals across public club sites, a sparkline, and a per-site leaderboard linking to each site. Only site-level totals leave the server: no paths, referrers, countries or visitor detail, and unlisted or password-protected sites never appear.
@@ -330,13 +346,15 @@ pm2 save
 
 ### Updating
 
-`scripts/update.sh` does the whole loop on the box: `git pull`, `npm install`, `npm run build`, restart the service, then print which environment variables the running process actually has. It prints variable names with `set` / `empty` / `missing` only, never values, so it is safe to run over a shared terminal.
+`scripts/update.sh` does the whole loop on the box: `git pull`, `npm install`, `npm run db:push`, `npm run build`, restart the service, then print which environment variables the running process actually has.
+
+`db:push` is in there because the schema is pushed, not migrated: a release that adds a table or a column will 500 every logged-in page until the database matches the code. The script stops before restarting if the push fails, so the running process is never switched onto code its database cannot serve. If `db:push` asks a question (it only does when a change would lose data), answer it in the terminal rather than letting the script sit there. It prints variable names with `set` / `empty` / `missing` only, never values, so it is safe to run over a shared terminal.
 
 ```bash
 bash scripts/update.sh
 ```
 
-Only `.env` is read at build time by Vite. Everything the server reads at runtime (`DATABASE_URL`, `SESSION_SECRET`, `PUBLIC_BASE_URL`, `SLACK_BOT_TOKEN`, `GITHUB_STATUS_TOKEN`, `THUMBNAILS_ENABLED`, `ANALYTICS_ALERTS_ENABLED`) has to be in the process environment, so put it in the systemd unit or an `EnvironmentFile=`, not only in `.env`. The script warns when `NODE_ENV=production` is missing at runtime, because the site-access cookie only gets the `Secure` flag in production.
+Only `.env` is read at build time by Vite. Everything the server reads at runtime (`DATABASE_URL`, `SESSION_SECRET`, `PUBLIC_BASE_URL`, `SLACK_BOT_TOKEN`, `GITHUB_STATUS_TOKEN`, `GITHUB_WEBHOOK_SECRET`, `THUMBNAILS_ENABLED`, `ANALYTICS_ALERTS_ENABLED`) has to be in the process environment, so put it in the systemd unit or an `EnvironmentFile=`, not only in `.env`. The script warns when `NODE_ENV=production` is missing at runtime, because the site-access cookie only gets the `Secure` flag in production.
 
 ### Reverse Proxy (Caddy)
 
@@ -421,6 +439,7 @@ Add to crontab:
 - `GET /websites/<id>/analytics/live` - Live visitor snapshot for the last five minutes
 - `GET /websites/<id>/thumbnail` - Deploy screenshot (requires `VIEW_WEBSITE`)
 - `POST /<slug>/` - Password submission for password-protected sites (the only accepted write to the serve route)
+- `GET /search` - Full text search over public club sites (login required)
 - `GET /stats` - Public aggregate pageviews across public sites
 - `GET /privacy` - Public analytics privacy explainer
 - `GET /<section>/` - Section index page (public sites only)

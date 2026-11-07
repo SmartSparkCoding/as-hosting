@@ -3,6 +3,7 @@ import {
 	updateWebsiteStatus,
 	updateWebsiteStorage,
 } from '$lib/server/services/website.service';
+import { reindexWebsite } from './search.service';
 import { countDeployments, createDeployment } from '$lib/server/services/deployment.service';
 import { Deployer } from '$lib/server/hosting/deployer';
 import { HostingStorage } from '$lib/server/hosting/storage';
@@ -84,6 +85,12 @@ export async function redeployWebsite(options: RedeployOptions): Promise<Redeplo
 				auditIssues: result.audit ? JSON.stringify(result.audit.issues) : null,
 			},
 		);
+
+		try {
+			await reindexWebsite(website.id);
+		} catch {
+			// Search indexing is best effort: a deploy that worked stays live.
+		}
 
 		return {
 			success: true,

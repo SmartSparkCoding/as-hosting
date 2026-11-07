@@ -13,6 +13,7 @@ import { logAudit, AuditAction } from './audit.service';
 import { getUserById } from './user.service';
 import { createSlackNotifier, notifyDeploymentFailure } from '../slack/notifier';
 import { postDeployStatus, deployTargetUrl } from '../github/deploy-status';
+import { reindexWebsite } from './search.service';
 
 /**
  * Creating and deploying a website, in one place.
@@ -103,6 +104,12 @@ export async function provisionWebsite(options: ProvisionOptions): Promise<Provi
 			}
 		);
 		await logAudit(userId, AuditAction.WEBSITE_DEPLOYED, `Deployed "${name}"`);
+
+		try {
+			await reindexWebsite(website.id);
+		} catch {
+			// Search indexing is best effort: a deploy that worked stays live.
+		}
 
 		return { name, slug, websiteId: website.id, deployed: true, log: result.log };
 	}
