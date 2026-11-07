@@ -263,6 +263,16 @@ pm2 start build/index.js --name as-hosting
 pm2 save
 ```
 
+### Updating
+
+`scripts/update.sh` does the whole loop on the box: `git pull`, `npm install`, `npm run build`, restart the service, then print which environment variables the running process actually has. It prints variable names with `set` / `empty` / `missing` only, never values, so it is safe to run over a shared terminal.
+
+```bash
+bash scripts/update.sh
+```
+
+Only `.env` is read at build time by Vite. Everything the server reads at runtime (`DATABASE_URL`, `SESSION_SECRET`, `PUBLIC_BASE_URL`, `SLACK_BOT_TOKEN`, `GITHUB_STATUS_TOKEN`, `THUMBNAILS_ENABLED`, `ANALYTICS_ALERTS_ENABLED`) has to be in the process environment, so put it in the systemd unit or an `EnvironmentFile=`, not only in `.env`. The script warns when `NODE_ENV=production` is missing at runtime, because the site-access cookie only gets the `Secure` flag in production.
+
 ### Reverse Proxy (Caddy)
 
 ```
