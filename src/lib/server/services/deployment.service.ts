@@ -3,7 +3,7 @@ import { db } from '../db';
 import { deployments } from '../db/schema';
 
 export interface DeploymentMeta {
-	kind?: 'deploy' | 'rollback' | 'recovery';
+	kind?: string;
 	release?: string | null;
 	commitSha?: string | null;
 	commitMessage?: string | null;

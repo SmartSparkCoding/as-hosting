@@ -9,18 +9,16 @@ import {
 	deleteWebsite,
 	setWebsiteVisibility,
 	setShowInPublicStats,
+	setPreviewsEnabled,
 	type SiteVisibility
 } from '$lib/server/services/website.service';
-import { countDeployments, getDeploymentsByWebsite, createDeployment } from '$lib/server/services/deployment.service';
+import { getDeploymentsByWebsite, createDeployment } from '$lib/server/services/deployment.service';
 import { getWebsiteAnalyticsHighlights, emptyAnalyticsHighlight } from '$lib/server/services/analytics.service';
-import { Deployer } from '$lib/server/hosting/deployer';
 import { HostingStorage } from '$lib/server/hosting/storage';
 import { hasPermission, Permission } from '$lib/permissions';
 import { logAudit, AuditAction } from '$lib/server/services/audit.service';
-import { getUserById } from '$lib/server/services/user.service';
 import { hashPassword } from '$lib/server/auth/password';
-import { deployTargetUrl, postDeployStatus } from '$lib/server/github/deploy-status';
-import { createSlackNotifier, notifyDeploymentFailure } from '$lib/server/slack/notifier';
+import { redeployWebsite } from '$lib/server/services/redeploy.service';
 import { formatBytes } from '$lib/utils';
 
 export const load: PageServerLoad = async ({ locals, params }) => {
@@ -64,91 +62,13 @@ export const actions: Actions = {
 		const website = await getWebsiteById(params.id);
 		if (!website) return fail(404, { error: 'Website not found' });
 
-		await updateWebsiteStatus(website.id, 'BUILDING');
-		await logAudit(locals.user.id, AuditAction.WEBSITE_DEPLOYED, `Redeploying "${website.name}"`);
+		const result = await redeployWebsite({
+			websiteId: website.id,
+			triggeredBy: locals.user.id,
+			kind: 'deploy'
+		});
 
-		const deployer = new Deployer();
-		const result = await deployer.deploy(website.id, website.gitUrl);
-		const publicUrl = `${process.env.PUBLIC_BASE_URL || 'http://localhost:5173'}/${website.slug}/`;
-		const deployNumber = (await countDeployments(website.id)) + 1;
-
-		if (result.success) {
-			const storage = new HostingStorage();
-			const bytes = await storage.getDirectorySize(storage.getCurrentPath(website.id));
-			await updateWebsiteStorage(website.id, bytes);
-			await updateWebsiteStatus(website.id, 'ACTIVE');
-
-			const statusLine = await postDeployStatus({
-				gitUrl: website.gitUrl,
-				commitSha: result.commitSha,
-				state: 'success',
-				description: `Deployed ${website.name}`,
-				targetUrl: deployTargetUrl(publicUrl, deployNumber)
-			}).catch(() => null);
-
-			await createDeployment(
-				website.id,
-				locals.user.id,
-				true,
-				statusLine ? `${result.log}\n${statusLine}` : result.log,
-				undefined,
-				{
-					kind: 'deploy',
-					release: result.release ?? null,
-					commitSha: result.commitSha ?? null,
-					commitMessage: result.commitMessage ?? null,
-					auditScore: result.audit?.score ?? null,
-					auditIssues: result.audit ? parseIssues(JSON.stringify(result.audit.issues)) : null
-				}
-			);
-		} else {
-			const existingSite = await getWebsiteById(website.id);
-			if (existingSite && existingSite.status !== 'BUILDING') {
-				// Had a live version, keep it active
-				await updateWebsiteStatus(website.id, existingSite.status as 'ACTIVE');
-			} else {
-				await updateWebsiteStatus(website.id, 'FAILED');
-			}
-
-			const statusLine = await postDeployStatus({
-				gitUrl: website.gitUrl,
-				commitSha: result.commitSha,
-				state: 'failure',
-				description: (result.error ?? 'Deploy failed').slice(0, 140),
-				targetUrl: publicUrl
-			}).catch(() => null);
-
-			await createDeployment(
-				website.id,
-				locals.user.id,
-				false,
-				statusLine ? `${result.log}\n${statusLine}` : result.log,
-				result.error,
-				{
-					kind: 'deploy',
-					release: null,
-					commitSha: result.commitSha ?? null,
-					commitMessage: result.commitMessage ?? null
-				}
-			);
-
-			try {
-				const fullUser = await getUserById(locals.user.id);
-				if (fullUser) {
-					const notifier = createSlackNotifier();
-					await notifyDeploymentFailure(
-						notifier,
-						fullUser.slackId,
-						website.name,
-						result.error || 'Unknown error'
-					);
-				}
-			} catch {
-				// Slack notification failure is non-critical
-			}
-		}
-
-		return { success: result.success, deployed: result.success };
+		return { success: result.success, deployed: result.success, error: result.error };
 	},
 
 	rollback: async ({ locals, params, request }) => {
@@ -205,6 +125,7 @@ export const actions: Actions = {
 		// silently arrives empty and PASSWORD mode looks broken.
 		const password = String(formData.get('accessPassword') ?? '');
 		const showInPublicStats = formData.get('showInPublicStats') === 'on';
+	const previewsEnabled = formData.get('previewsEnabled') === 'on';
 
 		if (!['PUBLIC', 'UNLISTED', 'PASSWORD'].includes(visibility)) {
 			return fail(400, { error: 'Unknown visibility option' });
@@ -240,7 +161,16 @@ export const actions: Actions = {
 			`Set "${website.name}" visibility to ${visibility}`
 		);
 
-		return { success: true, visibility };
+		if (previewsEnabled !== website.previewsEnabled) {
+			await setPreviewsEnabled(website.id, previewsEnabled);
+			await logAudit(
+				locals.user.id,
+				AuditAction.WEBSITE_PREVIEWS_CHANGED,
+				`${previewsEnabled ? 'Enabled' : 'Disabled'} pull request previews for "${website.name}"`
+			);
+		}
+
+		return { success: true, visibility, previewsEnabled };
 	},
 
 	archive: async ({ locals, params }) => {

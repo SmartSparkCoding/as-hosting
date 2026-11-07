@@ -15,6 +15,7 @@ export const AuditAction = {
 	WEBSITE_DEPLOYED: 'website.deployed',
 	WEBSITE_ROLLED_BACK: 'website.rolled_back',
 	WEBSITE_VISIBILITY_CHANGED: 'website.visibility_changed',
+	WEBSITE_PREVIEWS_CHANGED: 'website.previews_changed',
 	WEBSITE_ACCESS_PASSWORD_CHANGED: 'website.access_password_changed',
 	SESSION_CREATED: 'session.created',
 	SESSION_DELETED: 'session.deleted',
